@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Intel Corporation
+// Copyright (c) 2017-2020 Intel Corporation
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -2655,9 +2655,6 @@ mfxStatus CmCopyWrapper::InitializeSwapKernels(eMFXHWType hwtype)
     case MFX_HW_CFL:
         cmSts = m_pCmDevice->LoadProgram((void*)genx_copy_kernel_gen9,sizeof(genx_copy_kernel_gen9),m_pCmProgram,"nojitter");
         break;
-    case MFX_HW_CNL:
-        cmSts = m_pCmDevice->LoadProgram((void*)genx_copy_kernel_gen10,sizeof(genx_copy_kernel_gen10),m_pCmProgram,"nojitter");
-        break;
     case MFX_HW_ICL:
         cmSts = m_pCmDevice->LoadProgram((void*)genx_copy_kernel_gen11,sizeof(genx_copy_kernel_gen11),m_pCmProgram,"nojitter");
         break;
@@ -2670,6 +2667,8 @@ mfxStatus CmCopyWrapper::InitializeSwapKernels(eMFXHWType hwtype)
         break;
 #if (MFX_VERSION >= 1031)
     case MFX_HW_TGL_LP:
+    case MFX_HW_DG1:
+    case MFX_HW_RKL:
         cmSts = m_pCmDevice->LoadProgram((void*)genx_copy_kernel_gen12lp,sizeof(genx_copy_kernel_gen12lp),m_pCmProgram,"nojitter");
         break;
 #endif
@@ -3163,6 +3162,47 @@ mfxStatus CmCopyWrapper::CopyMirrorVideoToVideoMemory(void *pDst, void *pSrc, mf
 
 #define CM_RGB_SUPPORTED_COPY_SIZE(ROI) (ROI.width <= CM_RGB_MAX_GPUCOPY_SURFACE_HEIGHT && ROI.height <= CM_RGB_MAX_GPUCOPY_SURFACE_HEIGHT )
 
+bool CmCopyWrapper::CheckSurfaceContinuouslyAllocated(const mfxFrameSurface1 &surf)
+{
+    mfxU32 stride_in_bytes = surf.Data.PitchLow + ((mfxU32)surf.Data.PitchHigh << 16);
+
+    switch (surf.Info.FourCC)
+    {
+    // Packed formats like YUY2, UYVY, AYUV, Y416, Y210, Y410, A2RGB10, RGB565, RGB3 
+    // does not need to be handled here - they got only one plane with all the luma and chroma data interleaved
+
+    // Handling semi-planar formats
+    case MFX_FOURCC_P010:
+    case MFX_FOURCC_P016:
+    case MFX_FOURCC_P210:
+    case MFX_FOURCC_NV12:
+    case MFX_FOURCC_NV16:
+        {
+            size_t luma_size_in_bytes = stride_in_bytes * mfx::align2_value(surf.Info.Height, 32);
+            return surf.Data.Y + luma_size_in_bytes == surf.Data.UV;
+            break;
+        }
+
+    // Handling planar formats
+    case MFX_FOURCC_YV12:
+        {
+            size_t luma_size_in_bytes = stride_in_bytes * mfx::align2_value(surf.Info.Height, 32);
+            size_t chroma_size_in_bytes = luma_size_in_bytes / 4; //stride of the V plane is half the stride of the Y plane; and the V plane contains half as many lines as the Y plane
+            return surf.Data.Y + luma_size_in_bytes == surf.Data.V && surf.Data.V + chroma_size_in_bytes == surf.Data.U;
+            break;
+        }
+
+    // Handling RGB-like formats
+    case MFX_FOURCC_RGBP:
+        {
+            size_t channel_size_in_bytes = stride_in_bytes * mfx::align2_value(surf.Info.Height, 32);
+            return surf.Data.B + channel_size_in_bytes == surf.Data.G && surf.Data.G + channel_size_in_bytes == surf.Data.R;
+            break;
+        }
+    }
+    return true;
+}
+
 bool CmCopyWrapper::CanUseCmCopy(mfxFrameSurface1 *pDst, mfxFrameSurface1 *pSrc)
 {
     mfxSize roi = {std::min(pSrc->Info.Width, pDst->Info.Width), std::min(pSrc->Info.Height, pDst->Info.Height)};
@@ -3186,7 +3226,7 @@ bool CmCopyWrapper::CanUseCmCopy(mfxFrameSurface1 *pDst, mfxFrameSurface1 *pSrc)
         verticalPitch = (verticalPitch % pDst->Data.Pitch)? 0 : verticalPitch / pDst->Data.Pitch;
         if (isNV12LikeFormat(pDst->Info.FourCC) && isNV12LikeFormat(pSrc->Info.FourCC) && CM_ALIGNED(pDst->Data.Y) && CM_ALIGNED(pDst->Data.UV) && CM_SUPPORTED_COPY_SIZE(roi) && verticalPitch >= pDst->Info.Height && verticalPitch <= 16384)
         {
-            return true;
+            return CheckSurfaceContinuouslyAllocated(*pDst);
         }
         else if(isSinglePlainFormat(pDst->Info.FourCC) && isSinglePlainFormat(pSrc->Info.FourCC) && pSrc->Info.Shift == pDst->Info.Shift && CM_ALIGNED(dstPtr) && CM_SUPPORTED_COPY_SIZE(roi))
         {

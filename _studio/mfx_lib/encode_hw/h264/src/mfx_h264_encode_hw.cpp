@@ -1133,6 +1133,23 @@ mfxStatus ImplementationAvc::Init(mfxVideoParam * par)
         MFX_CHECK_STS(sts);
     }
 
+    if (IsMctfSupported(m_video))
+    {
+#if defined(MXF_ENABLE_MCTF_IN_AVC)
+        if (!m_cmDevice)
+        {
+            m_cmDevice.Reset(TryCreateCmDevicePtr(m_core));
+            if (!m_cmDevice)
+                return MFX_ERR_UNSUPPORTED;
+        }
+
+        amtMctf = std::make_shared<CMC>();
+        MFX_CHECK_NULL_PTR1(amtMctf);
+
+        sts = amtMctf->MCTF_INIT(m_core, m_cmDevice, m_video.mfx.FrameInfo, NULL, IsCmNeededForSCD(m_video), true, true, true);
+        MFX_CHECK_STS(sts);
+#endif
+    }
 
     sts = m_ddi->Register(m_bit, D3DDDIFMT_INTELENCODE_BITSTREAMDATA);
     MFX_CHECK_STS(sts);
@@ -1142,6 +1159,8 @@ mfxStatus ImplementationAvc::Init(mfxVideoParam * par)
         m_incoming.clear();
         m_ScDetectionStarted.clear();
         m_ScDetectionFinished.clear();
+        m_MctfStarted.clear();
+        m_MctfFinished.clear();
         m_reordering.clear();
         m_lookaheadStarted.clear();
         m_lookaheadFinished.clear();
@@ -1696,6 +1715,29 @@ void ImplementationAvc::OnScdFinished()
     m_reordering.splice(m_reordering.end(), m_ScDetectionFinished, m_ScDetectionFinished.begin());
 }
 
+void ImplementationAvc::SubmitMCTF()
+{
+    m_stagesToGo &= ~AsyncRoutineEmulator::STG_BIT_WAIT_SCD;
+
+    UMC::AutomaticUMCMutex guard(m_listMutex);
+    m_MctfStarted.splice(m_MctfStarted.end(), m_ScDetectionFinished, m_ScDetectionFinished.begin());
+}
+
+void ImplementationAvc::OnMctfQueried()
+{
+    m_stagesToGo &= ~AsyncRoutineEmulator::STG_BIT_START_MCTF;
+
+    UMC::AutomaticUMCMutex guard(m_listMutex);
+    m_MctfFinished.splice(m_MctfFinished.end(), m_MctfStarted, m_MctfStarted.begin());
+}
+
+void ImplementationAvc::OnMctfFinished()
+{
+    m_stagesToGo &= ~AsyncRoutineEmulator::STG_BIT_WAIT_MCTF;
+
+    UMC::AutomaticUMCMutex guard(m_listMutex);
+    m_reordering.splice(m_reordering.end(), m_MctfFinished, m_MctfFinished.begin());
+}
 
 void ImplementationAvc::OnLookaheadSubmitted(DdiTaskIter task)
 {
@@ -1939,6 +1981,89 @@ void ImplementationAvc::BrcPreEnc(
 
     m_brc.PreEnc(task.m_brcFrameParams, m_tmpVmeData);
 }
+#if defined(MXF_ENABLE_MCTF_IN_AVC)
+mfxStatus ImplementationAvc::SubmitToMctf(DdiTask * pTask, bool isSceneChange, bool doIntraFiltering)
+{
+    MFX_AUTO_LTRACE(MFX_TRACE_LEVEL_API, "VideoVPPHW::SubmitToMctf");
+    //mfxStatus sts = MFX_ERR_NONE;
+
+    pTask->m_bFrameReady   = false;
+    mfxFrameSurface1
+        * pSurfI         = nullptr;
+    pSurfI               = m_core->GetNativeSurface(pTask->m_yuv);
+    pSurfI               = pSurfI ? pSurfI : pTask->m_yuv;
+
+    amtMctf->IntBufferUpdate(isSceneChange);
+
+    if (IsCmNeededForSCD(m_video))
+    {
+        mfxStatus sts = GetNativeHandleToRawSurface(*m_core, m_video, *pTask, pTask->m_handleRaw);
+        if (sts != MFX_ERR_NONE)
+            return Error(sts);
+
+        if(amtMctf->MCTF_Check_Use())
+            pTask->m_cmRawForMCTF = CreateSurface(m_cmDevice, pTask->m_handleRaw, m_currentVaType);
+        MFX_SAFE_CALL(amtMctf->MCTF_PUT_FRAME(pTask->m_cmRawForMCTF, isSceneChange, true, nullptr, doIntraFiltering));
+    }
+    else
+    {
+        mfxFrameData
+            pData = pTask->m_yuv->Data;
+        FrameLocker
+            lock2(m_core, pData, true);
+        if (pData.Y == 0)
+            return Error(MFX_ERR_LOCK_MEMORY);
+
+        MFX_SAFE_CALL(amtMctf->MCTF_PUT_FRAME(pData.Y, isSceneChange, false, nullptr, doIntraFiltering));
+    }
+
+    // --- access to the internal MCTF queue to increase buffer_count: no need to protect by mutex, as 1 writer & 1 reader
+    MFX_SAFE_CALL(amtMctf->MCTF_UpdateBufferCount());
+
+    // filtering itself
+    MFX_SAFE_CALL(amtMctf->MCTF_DO_FILTERING_IN_AVC());
+
+    pTask->m_bFrameReady = amtMctf->MCTF_ReadyToOutput();
+
+    return MFX_ERR_NONE;
+}
+
+mfxStatus ImplementationAvc::QueryFromMctf(void *pParam, bool bEoF)
+{
+    (void)bEoF;
+
+    DdiTask *pTask = (DdiTask*)pParam;
+
+    if (!pTask)
+        return MFX_ERR_NULL_PTR;
+
+    mfxFrameSurface1 *pSurfI = nullptr;
+    pSurfI = m_core->GetNativeSurface(pTask->m_yuv);
+    pSurfI = pSurfI ? pSurfI : pTask->m_yuv;
+
+    if (IsCmNeededForSCD(m_video))
+    {
+        MFX_SAFE_CALL(amtMctf->MCTF_RELEASE_FRAME());
+        if (m_cmDevice && pTask->m_cmRawForMCTF)
+        {
+            m_cmDevice->DestroySurface(pTask->m_cmRawForMCTF);
+            pTask->m_cmRawForMCTF = nullptr;
+        }
+    }
+    else
+    {
+        mfxFrameData
+            pData = pTask->m_yuv->Data;
+        FrameLocker
+            lock2(m_core, pData, true);
+        if (pData.Y == 0)
+            return Error(MFX_ERR_LOCK_MEMORY);
+
+        MFX_SAFE_CALL(amtMctf->MCTF_GET_FRAME(pData.Y));
+    }
+    return MFX_ERR_NONE;
+}
+#endif
 using namespace ns_asc;
 mfxStatus ImplementationAvc::SCD_Put_Frame(DdiTask & task)
 {
@@ -2393,9 +2518,9 @@ mfxStatus ImplementationAvc::AsyncRoutine(mfxBitstream * bs)
     if (m_stagesToGo & AsyncRoutineEmulator::STG_BIT_START_SCD)
     {
         MFX_AUTO_LTRACE(MFX_TRACE_LEVEL_HOTSPOTS, "Avc::STG_BIT_START_SCD");
+        DdiTask & task = m_ScDetectionStarted.back();
         if (IsExtBrcSceneChangeSupported(m_video))
         {
-            DdiTask & task = m_ScDetectionStarted.back();
             MFX_CHECK_STS(SCD_Put_Frame(task));
         }
         OnScdQueried();
@@ -2403,10 +2528,12 @@ mfxStatus ImplementationAvc::AsyncRoutine(mfxBitstream * bs)
 
     if (m_stagesToGo & AsyncRoutineEmulator::STG_BIT_WAIT_SCD)
     {
+        DdiTask & task = m_ScDetectionFinished.front();
+
         MFX_AUTO_LTRACE(MFX_TRACE_LEVEL_HOTSPOTS, "Avc::STG_BIT_WAIT_SCD");
         if (IsExtBrcSceneChangeSupported(m_video))
         {
-            DdiTask & task = m_ScDetectionFinished.front();
+
             if (task.m_type[0] == 0)
                 task.m_type = GetFrameType(m_video, task.m_frameOrder - m_frameOrderIdrInDisplayOrder);
 
@@ -2414,9 +2541,34 @@ mfxStatus ImplementationAvc::AsyncRoutine(mfxBitstream * bs)
             MFX_CHECK_STS(SCD_Get_FrameType(task));
             AssignFrameTypes(task);
         }
-        OnScdFinished();
+        SubmitMCTF();
     }
 
+    if (m_stagesToGo & AsyncRoutineEmulator::STG_BIT_START_MCTF)
+    {
+        MFX_AUTO_LTRACE(MFX_TRACE_LEVEL_HOTSPOTS, "Avc::STG_BIT_START_MCTF");
+        if (IsMctfSupported(m_video))
+        {
+#if defined(MXF_ENABLE_MCTF_IN_AVC)
+            DdiTask & task = m_MctfStarted.back();
+            MFX_CHECK_STS(SubmitToMctf(&task, amtScd.Get_frame_shot_Decision(), amtScd.Get_intra_frame_denoise_recommendation()));
+#endif
+        }
+        OnMctfQueried();
+    }
+
+    if (m_stagesToGo & AsyncRoutineEmulator::STG_BIT_WAIT_MCTF)
+    {
+        MFX_AUTO_LTRACE(MFX_TRACE_LEVEL_HOTSPOTS, "Avc::STG_BIT_WAIT_MCTF");
+        if (IsMctfSupported(m_video))
+        {
+#if defined(MXF_ENABLE_MCTF_IN_AVC)
+            DdiTask & task = m_MctfFinished.front();
+            MFX_CHECK_STS(QueryFromMctf(&task, false));
+#endif
+        }
+        OnMctfFinished();
+    }
 
     if (m_stagesToGo & AsyncRoutineEmulator::STG_BIT_START_LA)
     {
@@ -2971,7 +3123,7 @@ mfxStatus ImplementationAvc::AsyncRoutine(mfxBitstream * bs)
                         }
                         else if (((res & UMC::BRC_NOT_ENOUGH_BUFFER) || (task->m_repack >2))&& (res & UMC::BRC_ERR_SMALL_FRAME ))
                         {
-                            task->m_minFrameSize = m_brc.GetMinFrameSize()/8;
+                            task->m_minFrameSize = (mfxU32) ((m_brc.GetMinFrameSize() + 7) >> 3 );
 
                             task->m_brcFrameParams.CodedFrameSize = task->m_minFrameSize;
                             m_brc.Report(task->m_brcFrameParams, 0, hrd.GetMaxFrameSize((task->m_type[task->m_fid[0]] & MFX_FRAMETYPE_IDR)), task->m_brcFrameCtrl);

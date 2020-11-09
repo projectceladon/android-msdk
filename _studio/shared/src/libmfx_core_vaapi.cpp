@@ -351,6 +351,7 @@ typedef struct {
 
     /* JSL */
     { 0x4E51, MFX_HW_JSL, MFX_GT2 },
+    { 0x4E55, MFX_HW_JSL, MFX_GT2 },
     { 0x4E61, MFX_HW_JSL, MFX_GT2 },
     { 0x4E71, MFX_HW_JSL, MFX_GT2 },
 
@@ -358,6 +359,7 @@ typedef struct {
     { 0x4500, MFX_HW_EHL, MFX_GT2 },
     { 0x4541, MFX_HW_EHL, MFX_GT2 },
     { 0x4551, MFX_HW_EHL, MFX_GT2 },
+    { 0x4555, MFX_HW_EHL, MFX_GT2 },
     { 0x4569, MFX_HW_EHL, MFX_GT2 },
     { 0x4571, MFX_HW_EHL, MFX_GT2 },
 
@@ -374,6 +376,19 @@ typedef struct {
     { 0x9AD9, MFX_HW_TGL_LP, MFX_GT2 },
     { 0x9AF8, MFX_HW_TGL_LP, MFX_GT2 },
 
+    /* DG1/SG1 */
+    { 0x4905, MFX_HW_DG1, MFX_GT2 },
+    { 0x4906, MFX_HW_DG1, MFX_GT2 },
+    { 0x4907, MFX_HW_DG1, MFX_GT2 },
+    { 0x4908, MFX_HW_DG1, MFX_GT2 },
+
+    /* RKL */
+    { 0x4C80, MFX_HW_RKL, MFX_GT1 },
+    { 0x4C8A, MFX_HW_RKL, MFX_GT1 },
+    { 0x4C81, MFX_HW_RKL, MFX_GT1 },
+    { 0x4C8B, MFX_HW_RKL, MFX_GT1 },
+    { 0x4C90, MFX_HW_RKL, MFX_GT1 },
+    { 0x4C9A, MFX_HW_RKL, MFX_GT1 },
 };
 
 /* END: IOCTLs definitions */
@@ -1056,27 +1071,27 @@ VAAPIVideoCORE::DoFastCopyWrapper(
         }
     }
 
-    sts = DoFastCopyExtended(&dstTempSurface, &srcTempSurface);
+    mfxStatus fcSts = DoFastCopyExtended(&dstTempSurface, &srcTempSurface);
 
-    if (MFX_ERR_DEVICE_FAILED == sts && 0 != dstTempSurface.Data.Corrupted)
+    if (MFX_ERR_DEVICE_FAILED == fcSts && 0 != dstTempSurface.Data.Corrupted)
     {
         // complete task even if frame corrupted
         pDst->Data.Corrupted = dstTempSurface.Data.Corrupted;
-        sts = MFX_ERR_NONE;
+        fcSts = MFX_ERR_NONE;
     }
-
-    MFX_CHECK_STS(sts);
 
     if (true == isSrcLocked)
     {
         if (srcMemType & MFX_MEMTYPE_EXTERNAL_FRAME)
         {
             sts = UnlockExternalFrame(srcMemId, &srcTempSurface.Data);
+            MFX_CHECK_STS(fcSts);
             MFX_CHECK_STS(sts);
         }
         else if (srcMemType & MFX_MEMTYPE_INTERNAL_FRAME)
         {
             sts = UnlockFrame(srcMemId, &srcTempSurface.Data);
+            MFX_CHECK_STS(fcSts);
             MFX_CHECK_STS(sts);
         }
     }
@@ -1086,16 +1101,18 @@ VAAPIVideoCORE::DoFastCopyWrapper(
         if (dstMemType & MFX_MEMTYPE_EXTERNAL_FRAME)
         {
             sts = UnlockExternalFrame(dstMemId, &dstTempSurface.Data);
+            MFX_CHECK_STS(fcSts);
             MFX_CHECK_STS(sts);
         }
         else if (dstMemType & MFX_MEMTYPE_INTERNAL_FRAME)
         {
             sts = UnlockFrame(dstMemId, &dstTempSurface.Data);
+            MFX_CHECK_STS(fcSts);
             MFX_CHECK_STS(sts);
         }
     }
 
-    return MFX_ERR_NONE;
+    return fcSts;
 
 } // mfxStatus VAAPIVideoCORE::DoFastCopyWrapper(...)
 

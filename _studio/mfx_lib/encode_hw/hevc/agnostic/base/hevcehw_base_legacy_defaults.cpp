@@ -311,8 +311,8 @@ public:
         , mfxU16(*pBL1)[8])
     {
         bool bExternal = false;
-        mfxU16 maxFwd, maxBwd;
-        std::tie(maxFwd, maxBwd) = par.base.GetMaxNumRef(par);
+        mfxU16 maxP = 0, maxBL0 = 0, maxBL1 = 0;
+        std::tie(maxP, maxBL0, maxBL1) = par.base.GetMaxNumRef(par);
 
         auto SetDefaultNRef =
             [](const mfxU16(*extRef)[8], mfxU16 defaultRef, mfxU16(*NumRefActive)[8])
@@ -346,9 +346,9 @@ public:
             extRefBL1 = &pCO3->NumRefActiveBL1;
         }
 
-        bExternal |= SetDefaultNRef(extRefP, maxFwd, pP);
-        bExternal |= SetDefaultNRef(extRefBL0, maxFwd, pBL0);
-        bExternal |= SetDefaultNRef(extRefBL1, maxBwd, pBL1);
+        bExternal |= SetDefaultNRef(extRefP, maxP, pP);
+        bExternal |= SetDefaultNRef(extRefBL0, maxBL0, pBL0);
+        bExternal |= SetDefaultNRef(extRefBL1, maxBL1, pBL1);
 
         return bExternal;
     }
@@ -630,8 +630,8 @@ public:
         return std::max<mfxU32>(minCPB, std::min<mfxU32>(maxCPB, defaultCPB));
     }
 
-    static std::tuple<mfxU16, mfxU16> MaxNumRef(
-        Defaults::TChain<std::tuple<mfxU16, mfxU16>>::TExt
+    static std::tuple<mfxU16, mfxU16, mfxU16> MaxNumRef(
+        Defaults::TChain<std::tuple<mfxU16, mfxU16, mfxU16>>::TExt
         , const Defaults::Param& par)
     {
         mfxU16 tu = par.mvp.mfx.TargetUsage;
@@ -664,6 +664,7 @@ public:
 
         return std::make_tuple(
             std::min<mfxU16>({ nRefL0, par.caps.MaxNum_Reference0, numRefFrame })
+            , std::min<mfxU16>({ nRefL0, par.caps.MaxNum_Reference0, numRefFrame })
             , std::min<mfxU16>({ nRefL1, par.caps.MaxNum_Reference1, numRefFrame }));
     }
 
@@ -1411,7 +1412,7 @@ public:
     {
         mfxU8 nL0 = 0, nL1 = 0;
 
-        if (IsB(fi.FrameType))
+        if (IsB(fi.FrameType) && !fi.isLDB)
         {
             const mfxExtCodingOption3& CO3 = ExtBuffer::Get(par.mvp);
             const mfxExtCodingOption2& CO2 = ExtBuffer::Get(par.mvp);
@@ -1421,13 +1422,15 @@ public:
             nL1 = (mfxU8)CO3.NumRefActiveBL1[layer];
         }
 
-        if (IsP(fi.FrameType))
+        if (IsP(fi.FrameType) || fi.isLDB)
         {
             const mfxExtCodingOption3& CO3 = ExtBuffer::Get(par.mvp);
             auto layer = mfx::clamp<mfxI32>(fi.PyramidLevel, 0, 7);
 
             nL0 = (mfxU8)CO3.NumRefActiveP[layer];
             nL1 = (mfxU8)std::min<mfxU16>(CO3.NumRefActiveP[layer], CO3.NumRefActiveBL1[layer]);
+            // on VDENC for LDB frames L1 must be completely identical to L0
+            nL1 = IsOn(par.mvp.mfx.LowPower) ? nL0: nL1;
         }
 
         return std::make_tuple(nL0, nL1);
@@ -1438,20 +1441,24 @@ public:
         , const mfxVideoParam& par
         , eMFXHWType hw)
     {
-        bool bValid =
-            par.mfx.LowPower
-            && !CheckTriState(par.mfx.LowPower);
+        if (!Check<mfxU16, MFX_CODINGOPTION_ON, MFX_CODINGOPTION_OFF>(par.mfx.LowPower))
+            return par.mfx.LowPower;
 
+        auto fcc = par.mfx.FrameInfo.FourCC;
         bool bOn =
-            (hw == MFX_HW_CNL
-                && par.mfx.TargetUsage >= 6
-                && par.mfx.GopRefDist < 2
-                && !bValid);
+            ((hw == MFX_HW_CNL
+              && par.mfx.TargetUsage >= 6
+              && par.mfx.GopRefDist < 2) ||
+             (hw >= MFX_HW_ICL &&
+              (fcc == MFX_FOURCC_AYUV
+#if (MFX_VERSION >= 1027)
+               || fcc == MFX_FOURCC_Y410
+#endif
+                  )));
 
         return mfxU16(
             bOn * MFX_CODINGOPTION_ON
-            + bValid * par.mfx.LowPower
-            + !(bOn || bValid) * MFX_CODINGOPTION_OFF);
+            + !bOn * MFX_CODINGOPTION_OFF);
     }
 
     static std::tuple<mfxU16, mfxU16> NumTiles(
@@ -1843,6 +1850,7 @@ public:
         auto& slo = vps.sub_layer[vps.max_sub_layers_minus1];
         const mfxExtHEVCParam&      HEVCParam = ExtBuffer::Get(defPar.mvp);
         const mfxExtCodingOption&   CO        = ExtBuffer::Get(defPar.mvp);
+        const mfxExtCodingOption2&  CO2       = ExtBuffer::Get(defPar.mvp);
         const mfxExtCodingOption3&  CO3       = ExtBuffer::Get(defPar.mvp);
         auto  hw  = defPar.hw;
         auto& mfx = defPar.mvp.mfx;
@@ -1878,6 +1886,11 @@ public:
         sps.long_term_ref_pics_present_flag     = 1;
         sps.temporal_mvp_enabled_flag           = 1;
         sps.strong_intra_smoothing_enabled_flag = 0;
+
+        // QpModulation support
+        bool  isBPyramid = (CO2.BRefType == MFX_B_REF_PYRAMID);
+        sps.low_delay_mode = bHwCNLPlus && (mfx.GopRefDist == 1);
+        sps.hierarchical_flag = bHwCNLPlus && isBPyramid && ((mfx.GopRefDist == 4) || (mfx.GopRefDist == 8));
 
         auto&  fi            = mfx.FrameInfo;
         mfxU16 SubWidthC[4]  = {1,2,2,1};
@@ -1982,8 +1995,8 @@ public:
         pps.num_extra_slice_header_bits           = 0;
         pps.sign_data_hiding_enabled_flag         = 0;
         pps.cabac_init_present_flag               = 0;
-        pps.num_ref_idx_l0_default_active_minus1  = std::max<mfxU16>(maxRefP, maxRefBL0) - 1;
-        pps.num_ref_idx_l1_default_active_minus1  = maxRefBL1 - 1;
+        pps.num_ref_idx_l0_default_active_minus1  = (par.mfx.GopRefDist <= 2) ? (maxRefP - 1) : (maxRefBL0 - 1);
+        pps.num_ref_idx_l1_default_active_minus1  = (par.mfx.GopRefDist <= 2) ? (maxRefP - 1) : (maxRefBL1 - 1);
         pps.init_qp_minus26                       = 0;
         pps.constrained_intra_pred_flag           = 0;
         pps.transform_skip_enabled_flag = (hw >= MFX_HW_CNL) && IsOn(CO3.TransformSkip);
@@ -2675,21 +2688,23 @@ public:
         mfxU16 maxDPB = par.mfx.NumRefFrame + 1;
         SetIf(maxDPB, !par.mfx.NumRefFrame, defPar.base.GetMaxDPB, defPar);
 
-        mfxU16 maxForward = std::min<mfxU16>(defPar.caps.MaxNum_Reference0, maxDPB - 1);
-        mfxU16 maxBackward = std::min<mfxU16>(defPar.caps.MaxNum_Reference1, maxDPB - 1);
+        mfxU16 maxP   = std::min<mfxU16>(defPar.caps.MaxNum_Reference0, maxDPB - 1);
+        mfxU16 maxBL0 = std::min<mfxU16>(defPar.caps.MaxNum_Reference0, maxDPB - 1);
+        mfxU16 maxBL1 = std::min<mfxU16>(defPar.caps.MaxNum_Reference1, maxDPB - 1);
 
         if (defPar.hw >= MFX_HW_CNL)
         {
             auto maxRefByTu = defPar.base.GetMaxNumRef(defPar);
-            maxForward = std::min<mfxU16>(maxForward, std::get<0>(maxRefByTu));
-            maxBackward = std::min<mfxU16>(maxBackward, std::get<1>(maxRefByTu));
+            maxP   = std::min<mfxU16>(maxP,   std::get<P>(maxRefByTu));
+            maxBL0 = std::min<mfxU16>(maxBL0, std::get<BL0>(maxRefByTu));
+            maxBL1 = std::min<mfxU16>(maxBL1, std::get<BL1>(maxRefByTu));
         }
 
         for (mfxU16 i = 0; i < 8; i++)
         {
-            changed += CheckMaxOrClip(pCO3->NumRefActiveP[i], maxForward);
-            changed += CheckMaxOrClip(pCO3->NumRefActiveBL0[i], maxForward);
-            changed += CheckMaxOrClip(pCO3->NumRefActiveBL1[i], maxBackward);
+            changed += CheckMaxOrClip(pCO3->NumRefActiveP  [i], maxP);
+            changed += CheckMaxOrClip(pCO3->NumRefActiveBL0[i], maxBL0);
+            changed += CheckMaxOrClip(pCO3->NumRefActiveBL1[i], maxBL1);
         }
 
         MFX_CHECK(!changed, MFX_WRN_INCOMPATIBLE_VIDEO_PARAM);

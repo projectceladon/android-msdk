@@ -38,6 +38,7 @@ include_directories( ${MSDK_LIB_ROOT}/encode_hw/hevc/linux/base )
 include_directories( ${MSDK_LIB_ROOT}/encode_hw/hevc/linux/g12 )
 include_directories( ${MSDK_LIB_ROOT}/shared/include)
 include_directories( ${MSDK_LIB_ROOT}/cmrt_cross_platform/include )
+include_directories( ${MSDK_LIB_ROOT}/mctf_package/mctf/include )
 include_directories( ${MSDK_LIB_ROOT}/enc_hw/mpeg2/include )
 include_directories( ${MSDK_LIB_ROOT}/pak/mpeg2/include )
 include_directories( ${MSDK_LIB_ROOT}/genx/h264_encode/isa )
@@ -88,6 +89,7 @@ list( APPEND sources
     hevc/agnostic/base/hevcehw_base_legacy_defaults.cpp
     hevc/agnostic/base/hevcehw_base_max_frame_size.cpp
     hevc/agnostic/base/hevcehw_base_packer.cpp
+    hevc/agnostic/base/hevcehw_base_recon_info.cpp
     hevc/agnostic/base/hevcehw_base_parser.cpp
     hevc/agnostic/base/hevcehw_base_roi.cpp
     hevc/agnostic/base/hevcehw_base_task.cpp
@@ -106,6 +108,7 @@ list( APPEND sources
     hevc/linux/base/hevcehw_base_max_frame_size_lin.cpp
     hevc/linux/g12/hevcehw_g12_lin.cpp
     hevc/linux/g12/hevcehw_g12_rext_lin.cpp
+    hevc/linux/g12/hevcehw_g12_qp_modulation_lin.cpp
 )
 
 make_library( encode hw static )

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Intel Corporation
+// Copyright (c) 2017-2020 Intel Corporation
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -790,7 +790,11 @@ mfxStatus CommonCORE::QueryPlatform(mfxPlatform* platform)
 #if (MFX_VERSION >= 1031)
     case MFX_HW_JSL    : platform->CodeName = MFX_PLATFORM_JASPERLAKE;    break;
     case MFX_HW_EHL    : platform->CodeName = MFX_PLATFORM_ELKHARTLAKE;   break;
+    case MFX_HW_RKL    :
     case MFX_HW_TGL_LP : platform->CodeName = MFX_PLATFORM_TIGERLAKE;     break;
+    case MFX_HW_DG1    :
+                         platform->MediaAdapterType = MFX_MEDIA_DISCRETE;
+                         platform->CodeName = MFX_PLATFORM_TIGERLAKE;     break;
 
 #endif
     default:
@@ -1132,19 +1136,20 @@ mfxStatus CommonCORE::DoFastCopyWrapper(mfxFrameSurface1 *pDst, mfxU16 dstMemTyp
         return MFX_ERR_UNDEFINED_BEHAVIOR;
     }
 
-    sts = DoFastCopyExtended(&dstTempSurface, &srcTempSurface);
-    MFX_CHECK_STS(sts);
+    mfxStatus fcSts = DoFastCopyExtended(&dstTempSurface, &srcTempSurface);
 
     if (true == isSrcLocked)
     {
         if (srcMemType & MFX_MEMTYPE_EXTERNAL_FRAME)
         {
             sts = UnlockExternalFrame(srcMemId, &srcTempSurface.Data);
+            MFX_CHECK_STS(fcSts);
             MFX_CHECK_STS(sts);
         }
         else if (srcMemType & MFX_MEMTYPE_INTERNAL_FRAME)
         {
             sts = UnlockFrame(srcMemId, &srcTempSurface.Data);
+            MFX_CHECK_STS(fcSts);
             MFX_CHECK_STS(sts);
         }
     }
@@ -1154,16 +1159,18 @@ mfxStatus CommonCORE::DoFastCopyWrapper(mfxFrameSurface1 *pDst, mfxU16 dstMemTyp
         if (dstMemType & MFX_MEMTYPE_EXTERNAL_FRAME)
         {
             sts = UnlockExternalFrame(dstMemId, &dstTempSurface.Data);
+            MFX_CHECK_STS(fcSts);
             MFX_CHECK_STS(sts);
         }
         else if (dstMemType & MFX_MEMTYPE_INTERNAL_FRAME)
         {
             sts = UnlockFrame(dstMemId, &dstTempSurface.Data);
+            MFX_CHECK_STS(fcSts);
             MFX_CHECK_STS(sts);
         }
     }
 
-    return MFX_ERR_NONE;
+    return fcSts;
 }
 
 mfxStatus CommonCORE::DoFastCopy(mfxFrameSurface1 *dst, mfxFrameSurface1 *src)

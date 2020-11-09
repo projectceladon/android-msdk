@@ -32,6 +32,12 @@ namespace HEVCEHW
 {
 namespace Base
 {
+    enum FType { // Frame type for GetMaxNumRef tuple
+        P = 0,
+        BL0 = 1,
+        BL1 = 2
+    };
+
     class Legacy
         : public FeatureBase
     {
@@ -85,7 +91,6 @@ namespace Base
     DECL_BLOCK(SetSlices            )\
     DECL_BLOCK(SetReorder           )\
     DECL_BLOCK(AllocRaw             )\
-    DECL_BLOCK(AllocRec             )\
     DECL_BLOCK(AllocBS              )\
     DECL_BLOCK(AllocMBQP            )\
     DECL_BLOCK(ResetInit            )\
@@ -104,7 +109,7 @@ namespace Base
     DECL_BLOCK(CopyBS               )\
     DECL_BLOCK(DoPadding            )\
     DECL_BLOCK(UpdateBsInfo         )\
-    DECL_BLOCK(SetRecInfo           )\
+    DECL_BLOCK(SetRawInfo           )\
     DECL_BLOCK(FreeTask             )
 #define DECL_FEATURE_NAME "Base_Legacy"
 #include "hevcehw_decl_blocks.h"
@@ -124,7 +129,7 @@ namespace Base
         mfxU16
             m_CUQPBlkW          = 0
             , m_CUQPBlkH        = 0;
-        std::function<std::tuple<mfxU16, mfxU16>(const mfxVideoParam&)> m_GetMaxRef;
+        std::function<std::tuple<mfxU16, mfxU16, mfxU16>(const mfxVideoParam&)> m_GetMaxRef;
         std::unique_ptr<Defaults::Param> m_pQWCDefaults;
         NotNull<Defaults*> m_pQNCDefaults;
         eMFXHWType m_hw = MFX_HW_UNKNOWN;
@@ -238,19 +243,10 @@ namespace Base
         {
             return par.AsyncDepth + (par.mfx.GopRefDist - 1) + (par.AsyncDepth > 1);
         }
-        mfxU16 GetMaxRec(mfxVideoParam const & par)
-        {
-            return par.AsyncDepth + par.mfx.NumRefFrame + (par.AsyncDepth > 1);
-        }
         mfxU16 GetMaxBS(mfxVideoParam const & par)
         {
             return par.AsyncDepth + (par.AsyncDepth > 1);
         }
-        bool GetRecInfo(
-            const mfxVideoParam& par
-            , const mfxExtCodingOption3& CO3
-            , eMFXHWType hw
-            , mfxFrameInfo& rec);
         mfxU32 GetMinBsSize(
             const mfxVideoParam & par
             , const mfxExtHEVCParam& HEVCParam

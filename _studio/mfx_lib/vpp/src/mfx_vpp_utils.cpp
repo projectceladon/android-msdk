@@ -1344,6 +1344,12 @@ mfxStatus CheckFrameInfo(mfxFrameInfo* info, mfxU32 request, eMFXHWType platform
         case MFX_FOURCC_NV16:
         case MFX_FOURCC_YUY2:
         case MFX_FOURCC_AYUV:
+        // A2RGB10 supported as input in case of passthru copy
+        case MFX_FOURCC_A2RGB10:
+#if defined(MFX_VA_LINUX)
+        // UYVY is supported on Linux only
+        case MFX_FOURCC_UYVY:
+#endif
             break;
 #if (MFX_VERSION >= 1027)
         case MFX_FOURCC_Y210:
@@ -1365,18 +1371,12 @@ mfxStatus CheckFrameInfo(mfxFrameInfo* info, mfxU32 request, eMFXHWType platform
         case MFX_FOURCC_YUV422H:
         case MFX_FOURCC_YUV422V:
         case MFX_FOURCC_YUV444:
-#if defined(MFX_VA_LINUX)
-        // UYVY is only supported as input on Linux
-        case MFX_FOURCC_UYVY:
-#endif
             if (VPP_OUT == request)
                 return MFX_ERR_INVALID_VIDEO_PARAM;
             break;
 #ifdef MFX_ENABLE_RGBP
         case MFX_FOURCC_RGBP:
 #endif
-        case MFX_FOURCC_A2RGB10:
-            // 10bit RGB supported as output format only
             if (VPP_IN == request)
                 return MFX_ERR_INVALID_VIDEO_PARAM;
 

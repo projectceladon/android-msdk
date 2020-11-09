@@ -1,16 +1,17 @@
 # Intel® Media SDK
 Intel® Media SDK provides a plain C API to access hardware-accelerated video decode, encode and filtering on Intel® Gen graphics hardware platforms. Implementation written in C++ 11 with parts in C-for-Media (CM).
 
-**Supported video encoders**: HEVC, AVC, MPEG-2, JPEG, VP9
-**Supported video decoders**: HEVC, AVC, VP8, VP9, MPEG-2, VC1, JPEG
-**Supported video pre-processing filters**: Color Conversion, Deinterlace, Denoise, Resize, Rotate, Composition
+**Supported video encoders**: HEVC, AVC, MPEG-2, JPEG, VP9  
+**Supported video decoders**: HEVC, AVC, VP8, VP9, MPEG-2, VC1, JPEG  
+**Supported video pre-processing filters**: Color Conversion, Deinterlace, Denoise, Resize, Rotate, Composition  
+
+Media SDK is a part of Intel software stack for graphics:
+* [Linux Graphics Drivers](https://intel.com/linux-graphics-drivers) - General Purpose GPU Drivers for Linux&ast; Operating Systems
+  * Visit [documentation](https://dgpu-docs.intel.com) for instructions on installing, deploying, and updating Intel software to enable general purpose GPU (GPGPU) capabilities for Linux&ast;-based operating system distributions.
 
 # Dependencies
 Intel Media SDK depends on [LibVA](https://github.com/01org/libva/).
 This version of Intel Media SDK is compatible with the open source [Intel Media Driver for VAAPI](https://github.com/intel/media-driver).
-
-# FAQ
-You can find answers for the most frequently asked questions [here](https://software.intel.com/sites/default/files/managed/c0/8e/intel-media-sdk-open-source-faq.pdf).
 
 # Table of contents
 
@@ -60,8 +61,6 @@ Linux Samples Readme Documents:
 
 Visit our [Github Wiki](https://github.com/Intel-Media-SDK/MediaSDK/wiki) for the detailed setting and building instructions, runtime tips and other information.
 
-You may also wish to visit Intel Media Server Studio [support page](https://software.intel.com/en-us/intel-media-server-studio-support/documentation) for additional documentation.
-
 # Tutorials
 
 * [Tutorials Overview](./doc/tutorials/mediasdk-tutorials-readme.md)
@@ -69,8 +68,23 @@ You may also wish to visit Intel Media Server Studio [support page](https://soft
 
 # Products which use Media SDK
 
-* [Intel Media Server Studio](https://software.intel.com/en-us/intel-media-server-studio)
-* [Intel Media SDK for Embedded Linux](https://software.intel.com/en-us/media-sdk/choose-download/embedded-iot)
+Use Media SDK via popular frameworks:
+* [FFmpeg](http://ffmpeg.org/) via [ffmpeg-qsv](https://trac.ffmpeg.org/wiki/Hardware/QuickSync) plugins
+* [GStreamer](https://gstreamer.freedesktop.org/) via plugins set included
+  into [gst-plugins-bad](https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad)
+
+Learn best practises and borrow fragments for final solutions:
+* https://github.com/intel/media-delivery
+  * This collection of samples demonstrates best practices to achieve optimal video quality and
+    performance on Intel GPUs for content delivery networks. Check out the demo, recommended command
+    lines and quality and performance measuring tools.
+
+Use Media SDK via other Intel products:
+* [OpenVINO Toolkit](https://github.com/openvinotoolkit/openvino)
+  * This toolkit allows developers to deploy pre-trained deep learning models through a high-level C++ Inference Engine API integrated with application logic.
+* [Open Visual Cloud](https://github.com/OpenVisualCloud)
+  * The Open Visual Cloud is a set of open source software stacks (with full end-to-end sample pipelines) for media, analytics, graphics and immersive media, optimized for cloud native deployment on commercial-off-the-shelf x86 CPU architecture.
+
 
 # System requirements
 

@@ -21,25 +21,9 @@ or https://software.intel.com/en-us/media-client-solutions-support.
 
 #include "sample_defs.h"
 
-#ifndef MSDK_MAJOR
-#define MSDK_MAJOR 8
-#endif
-
-#ifndef MSDK_MINOR
-#define MSDK_MINOR 4
-#endif
-
-#ifndef MSDK_RELEASE
-#define MSDK_TARGETAPIMINOR 33
-#endif
-
-#ifndef MSDK_BUILD
-#define MSDK_BUILD 0
-#endif
-
 static msdk_string GetMSDKSampleVersion()
 {
     msdk_stringstream ss;
-    ss << "20.2.0";
+    ss << "20.3.0";
     return ss.str();
 }

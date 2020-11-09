@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Intel Corporation
+// Copyright (c) 2007-2020 Intel Corporation
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -73,6 +73,9 @@ enum eMFXHWType
     MFX_HW_EHL       = 0x1500002,
     
     MFX_HW_TGL_LP    = 0x1600000,
+    MFX_HW_RKL       = MFX_HW_TGL_LP + 2,
+    MFX_HW_DG1       = 0x1600003,
+
 
 };
 
@@ -86,11 +89,6 @@ enum eMFXGTConfig
 };
 
 // mfxU8 CodecProfile, CodecLevel
-// They are the same numbers as used in specific codec standards.
-enum {
-    // AVC Profiles & Levels
-    MFX_PROFILE_AVC_HIGH10      =110,
-};
 /*
 Some components (samples, JPEG decoder) has used MFX_FOURCC_RGBP already.
 So, for API 1.27 and below "MFX_FOURCC_RGBP" defined inside of msdk library

@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Intel Corporation
+// Copyright (c) 2019-2020 Intel Corporation
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,7 +45,7 @@ public:
 
     RExt(mfxU32 FeatureId)
         : FeatureBase(FeatureId)
-    {}
+    { }
 
 protected:
     virtual void InitInternal(const FeatureBlocks& blocks, TPushII Push) override;
@@ -65,6 +65,9 @@ protected:
     static const GUID DXVA2_Intel_Encode_HEVC_Main12;
     static const GUID DXVA2_Intel_Encode_HEVC_Main422_12;
     static const GUID DXVA2_Intel_Encode_HEVC_Main444_12;
+
+    typedef std::function<void(mfxFrameInfo&)> RecUpd;
+    std::map<mfxU16, RecUpd> mUpdateRecInfo;
 };
 
 } //Gen12

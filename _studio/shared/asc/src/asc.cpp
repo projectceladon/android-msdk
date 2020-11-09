@@ -24,7 +24,6 @@
 #include "libmfx_core_interface.h"
 #include "genx_scd_gen8_isa.h"
 #include "genx_scd_gen9_isa.h"
-#include "genx_scd_gen10_isa.h"
 #include "genx_scd_gen11_isa.h"
 #include "genx_scd_gen11lp_isa.h"
 #include "genx_scd_gen12lp_isa.h"
@@ -34,6 +33,9 @@
 #include "motion_estimation_engine.h"
 #include <limits.h>
 #include <algorithm>
+#ifdef ANDROID
+#include <cmath>
+#endif
 
 using std::min;
 using std::max;
@@ -307,6 +309,7 @@ mfxStatus ASC::InitGPUsurf(CmDevice* pCmDevice) {
         res = m_device->LoadProgram((void *)genx_scd_gen11lp, sizeof(genx_scd_gen11lp), m_program, "nojitter");
         break;
     case PLATFORM_INTEL_TGLLP:
+    case PLATFORM_INTEL_DG1:
         res = m_device->LoadProgram((void *)genx_scd_gen12lp, sizeof(genx_scd_gen12lp), m_program, "nojitter");
         break;
     default:
@@ -1118,11 +1121,27 @@ bool ASC::CompareStats(mfxU8 current, mfxU8 reference) {
     return Not_same;
 }
 
+bool ASC::DenoiseIFrameRec() {
+    bool
+        result = false;
+    mfxF64
+        c1 = 10.24346,
+        c0 = -11.5751,
+        x = (mfxF64)m_support->logic[ASCcurrent_frame_data]->SC,
+        y = (mfxF64)m_support->logic[ASCcurrent_frame_data]->avgVal;
+    result = ((c1 * std::log(x)) + c0) >= y;
+    return result;
+}
+
 bool ASC::FrameRepeatCheck() {
     mfxU8 reference = ASCprevious_frame_data;
     if (m_dataIn->interlaceMode > ASCprogressive_frame)
         reference = ASCprevious_previous_frame_data;
     return(CompareStats(ASCcurrent_frame_data, reference));
+}
+
+bool ASC::DoMCTFFilteringCheck() {
+    return true;
 }
 
 void ASC::DetectShotChangeFrame() {
@@ -1133,6 +1152,8 @@ void ASC::DetectShotChangeFrame() {
     m_support->logic[ASCcurrent_frame_data]->Rs = m_videoData[ASCCurrent_Frame]->layer.RsVal;
     m_support->logic[ASCcurrent_frame_data]->Cs = m_videoData[ASCCurrent_Frame]->layer.CsVal;
     m_support->logic[ASCcurrent_frame_data]->SC = m_videoData[ASCCurrent_Frame]->layer.RsVal + m_videoData[ASCCurrent_Frame]->layer.CsVal;
+    m_support->logic[ASCcurrent_frame_data]->doFilter_flag    = DoMCTFFilteringCheck();
+    m_support->logic[ASCcurrent_frame_data]->filterIntra_flag = DenoiseIFrameRec();
     if (m_support->firstFrame) {
         m_support->logic[ASCcurrent_frame_data]->TSC                = 0;
         m_support->logic[ASCcurrent_frame_data]->AFD                = 0;
@@ -1758,6 +1779,10 @@ ASC_API mfxI32 ASC::Get_frame_Temporal_complexity() {
         return 0;
 }
 
+ASC_API bool ASC::Get_intra_frame_denoise_recommendation() {
+    return m_support->logic[ASCprevious_frame_data]->filterIntra_flag;
+}
+
 ASC_API mfxU32 ASC::Get_PDist_advice() {
     if (m_dataReady)
         return m_support->logic[ASCprevious_frame_data]->pdist;
@@ -1777,6 +1802,9 @@ ASC_API bool ASC::Get_RepeatedFrame_advice() {
         return m_support->logic[ASCprevious_frame_data]->repeatedFrame;
     else
         return NULL;
+}
+ASC_API bool ASC::Get_Filter_advice() {
+    return m_support->logic[ASCprevious_frame_data]->doFilter_flag;
 }
 
 /**

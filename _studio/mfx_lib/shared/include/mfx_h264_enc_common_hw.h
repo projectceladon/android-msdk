@@ -606,6 +606,7 @@ namespace MfxHwH264Encode
             mfxU16 widthLa;
             mfxU16 heightLa;
             mfxU32 TCBRCTargetFrameSize;
+            mfxU32 PPyrInterval;
         } calcParam;
     };
 
@@ -639,8 +640,10 @@ namespace MfxHwH264Encode
     bool IsLookAheadSupported(
         MfxVideoParam const & video,
         eMFXHWType            platform);
+    bool IsMctfSupported(
+        MfxVideoParam const & video);
 
-    bool  IsExtBrcSceneChangeSupported(
+    bool IsExtBrcSceneChangeSupported(
         MfxVideoParam const & video);
 
     bool IsCmNeededForSCD(

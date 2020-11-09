@@ -361,8 +361,8 @@ UMC::Status FillVideoParam(const H265SeqParamSet * seq, mfxVideoParam *par, bool
 
     //if (seq->frame_cropping_flag)
     {
-        par->mfx.FrameInfo.CropX = (mfxU16)(seq->conf_win_left_offset + seq->def_disp_win_left_offset);
-        par->mfx.FrameInfo.CropY = (mfxU16)(seq->conf_win_top_offset + seq->def_disp_win_top_offset);
+        par->mfx.FrameInfo.CropX = (mfxU16)(seq->conf_win_left_offset);
+        par->mfx.FrameInfo.CropY = (mfxU16)(seq->conf_win_top_offset);
         par->mfx.FrameInfo.CropH = (mfxU16)(par->mfx.FrameInfo.Height - (seq->conf_win_top_offset + seq->conf_win_bottom_offset));
         par->mfx.FrameInfo.CropW = (mfxU16)(par->mfx.FrameInfo.Width - (seq->conf_win_left_offset + seq->conf_win_right_offset));
 
@@ -833,6 +833,26 @@ mfxStatus Query_H265(VideoCORE *core, mfxVideoParam *in, mfxVideoParam *out, eMF
             out->mfx.FrameInfo.Height = 0;
             sts = MFX_ERR_UNSUPPORTED;
         }
+
+        if (!in->mfx.FrameInfo.Width || (
+            in->mfx.FrameInfo.CropX <= in->mfx.FrameInfo.Width &&
+            in->mfx.FrameInfo.CropY <= in->mfx.FrameInfo.Height &&
+            in->mfx.FrameInfo.CropX + in->mfx.FrameInfo.CropW <= in->mfx.FrameInfo.Width &&
+            in->mfx.FrameInfo.CropY + in->mfx.FrameInfo.CropH <= in->mfx.FrameInfo.Height))
+        {
+            out->mfx.FrameInfo.CropX = in->mfx.FrameInfo.CropX;
+            out->mfx.FrameInfo.CropY = in->mfx.FrameInfo.CropY;
+            out->mfx.FrameInfo.CropW = in->mfx.FrameInfo.CropW;
+            out->mfx.FrameInfo.CropH = in->mfx.FrameInfo.CropH;
+        }
+        else {
+            out->mfx.FrameInfo.CropX = 0;
+            out->mfx.FrameInfo.CropY = 0;
+            out->mfx.FrameInfo.CropW = 0;
+            out->mfx.FrameInfo.CropH = 0;
+            sts = MFX_ERR_UNSUPPORTED;
+        }
+
 
         out->mfx.FrameInfo.FrameRateExtN = in->mfx.FrameInfo.FrameRateExtN;
         out->mfx.FrameInfo.FrameRateExtD = in->mfx.FrameInfo.FrameRateExtD;

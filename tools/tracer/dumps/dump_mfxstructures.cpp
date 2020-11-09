@@ -429,6 +429,9 @@ std::string DumpContext::dump(const std::string structName, const mfxInfoMFX &mf
     str += structName + ".SliceGroupsPresent=" + ToString(mfx.SliceGroupsPresent) + "\n";
     str += structName + ".MaxDecFrameBuffering=" + ToString(mfx.MaxDecFrameBuffering) + "\n";
     str += structName + ".EnableReallocRequest=" + ToString(mfx.EnableReallocRequest) + "\n";
+#if (MFX_VERSION >= 1034)
+    str += structName + ".IgnoreLevelConstrain=" + ToString(mfx.IgnoreLevelConstrain) + "\n";
+#endif
     str += structName + ".reserved2[]=" + DUMP_RESERVED_ARRAY(mfx.reserved2) + "\n";
     str += structName + ".JPEGChromaFormat=" + ToString(mfx.JPEGChromaFormat) + "\n";
     str += structName + ".Rotation=" + ToString(mfx.Rotation) + "\n";
@@ -1304,6 +1307,38 @@ std::string DumpContext::dump(const std::string structName, const  mfxExtMBQP &E
     return str;
 }
 
+std::string DumpContext::dump(const std::string structName, const  mfxExtEncoderIPCMArea &ExtEncoderIPCMArea)
+{
+    std::string str;
+    str += dump(structName + ".Header", ExtEncoderIPCMArea.Header) + "\n";
+    str += structName + ".reserve1[]=" + DUMP_RESERVED_ARRAY(ExtEncoderIPCMArea.reserve1) + "\n";
+    str += structName + ".NumArea=" + ToString(ExtEncoderIPCMArea.NumArea) + "\n";
+    // dump Area
+    if (ExtEncoderIPCMArea.Areas == nullptr)
+    {
+        str += structName + ".Areas = nullptr \n";
+        return str;
+    }
+ 
+    for (mfxU16 i = 0; i < ExtEncoderIPCMArea.NumArea; i++) {
+        str += structName + ".Areas[" + ToString(i) + "].Left=" + ToString(ExtEncoderIPCMArea.Areas[i].Left) + "\n";
+        str += structName + ".Areas[" + ToString(i) + "].Top=" + ToString(ExtEncoderIPCMArea.Areas[i].Top) + "\n";
+        str += structName + ".Areas[" + ToString(i) + "].Right=" + ToString(ExtEncoderIPCMArea.Areas[i].Right) + "\n";
+        str += structName + ".Areas[" + ToString(i) + "].Bottom=" + ToString(ExtEncoderIPCMArea.Areas[i].Bottom) + "\n";
+        str += structName + ".Areas[" + ToString(i) + "].reserved2=" +  DUMP_RESERVED_ARRAY(ExtEncoderIPCMArea.Areas[i].reserved2) + "\n";
+    }
+    return str;
+}
+
+std::string DumpContext::dump(const std::string structName, const  mfxExtInsertHeaders& ExtInsertHeaders)
+{
+    std::string str;
+    str += dump(structName + ".Header", ExtInsertHeaders.Header) + "\n";
+    str += structName + ".SPS="  + ToString(ExtInsertHeaders.SPS) + "\n";
+    str += structName + ".PPS=" + ToString(ExtInsertHeaders.PPS) + "\n";
+    return str;
+}
+
 #if (MFX_VERSION >= 1025)
 std::string DumpContext::dump(const std::string structName, const  mfxExtMasteringDisplayColourVolume &_struct) {
     std::string str;
@@ -1488,6 +1523,65 @@ std::string DumpContext::dump(const std::string structName, const  mfxExtVP9Para
     return str;
 }
 
+#endif
+
+#if (MFX_VERSION >= 1034)
+std::string DumpContext::dump(const std::string structName, const mfxExtAV1FilmGrainParam &_struct)
+{
+    std::string str;
+    str += dump(structName + ".Header", _struct.Header) + "\n";
+    DUMP_FIELD(FilmGrainFlags);
+    DUMP_FIELD(GrainSeed);
+    DUMP_FIELD(RefIdx);
+    DUMP_FIELD(NumYPoints);
+    DUMP_FIELD(NumCbPoints);
+    DUMP_FIELD(NumCrPoints);
+
+    for (mfxU16 i = 0; i < 14 && i < _struct.NumYPoints; i++)
+    {
+        str += dump(structName + ".PointY[" + ToString(i) + "].Value", _struct.PointY[i].Value) + "\n";
+        str += dump(structName + ".PointY[" + ToString(i) + "].Scaling", _struct.PointY[i].Scaling) + "\n";
+    }
+
+    for (mfxU16 i = 0; i < 10 && i < _struct.NumCbPoints; i++)
+    {
+        str += dump(structName + ".PointCb[" + ToString(i) + "].Value", _struct.PointCb[i].Value) + "\n";
+        str += dump(structName + ".PointCb[" + ToString(i) + "].Scaling", _struct.PointCb[i].Scaling) + "\n";
+    }
+
+    for (mfxU16 i = 0; i < 10 && i < _struct.NumCrPoints; i++)
+    {
+        str += dump(structName + ".PointCr[" + ToString(i) + "].Value", _struct.PointCr[i].Value) + "\n";
+        str += dump(structName + ".PointCr[" + ToString(i) + "].Scaling", _struct.PointCr[i].Scaling) + "\n";
+    }
+
+    DUMP_FIELD(GrainScalingMinus8);
+    DUMP_FIELD(ArCoeffLag);
+
+    for (mfxU16 i = 0; i < 24; i++)
+    {
+        str += dump(structName + ".ArCoeffsYPlus128[" + ToString(i) + "]", _struct.ArCoeffsYPlus128[i]) + "\n";
+    }
+
+    for (mfxU16 i = 0; i < 25; i++)
+    {
+        str += dump(structName + ".ArCoeffsCbPlus128[" + ToString(i) + "]", _struct.ArCoeffsCbPlus128[i]) + "\n";
+        str += dump(structName + ".ArCoeffsCrPlus128[" + ToString(i) + "]", _struct.ArCoeffsCrPlus128[i]) + "\n";
+    }
+
+    DUMP_FIELD(ArCoeffShiftMinus6);
+    DUMP_FIELD(GrainScaleShift);
+    DUMP_FIELD(CbMult);
+    DUMP_FIELD(CbLumaMult);
+    DUMP_FIELD(CbOffset);
+    DUMP_FIELD(CrMult);
+    DUMP_FIELD(CrLumaMult);
+    DUMP_FIELD(CrOffset);
+
+    str += structName + ".reserved[]=" + DUMP_RESERVED_ARRAY(_struct.reserved) + "\n";
+
+    return str;
+}
 #endif
 
 #if (MFX_VERSION >= MFX_VERSION_NEXT)

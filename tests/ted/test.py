@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2017 Intel Corporation
+# Copyright (c) 2017-2020 Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import os
 import json
 import datetime
 import collections
@@ -28,7 +27,7 @@ import itertools
 
 from pathlib import Path
 
-from . import objects, run
+from . import objects, run, platform
 
 
 class ValidationError(Exception):
@@ -55,11 +54,12 @@ class CaseLogger(object):
 
 
 class Test(object):
-    def __init__(self, fn, base, cfg, gold):
+    def __init__(self, fn, base, cfg, args):
         self.cases = []
         self.cfg = cfg
         self.test_type = None
         self.base_dir = Path(base)
+        self.device = args.device
 
         fn = Path(fn)
 
@@ -67,31 +67,14 @@ class Test(object):
         self.name = fn.stem
 
         self.results = self.base_dir / 'results' / self.name
-        self.gold = self.base_dir / 'gold' / self.name
 
         self.generate_cases()
 
-        subdir = 'gold' if gold else 'results'
-        
-        extended_path = {
-            'PATH': str(base.resolve() / subdir / 'bin') + os.pathsep + os.environ['PATH'],
-            'LD_LIBRARY_PATH': str(base.resolve() / subdir / 'bin' / 'lib'),
-        }
-
-        self.runner = run.Runner(extended_path, cfg)
-
-    @property
-    def gold_collected(self):
-        return self.gold.exists()
+        self.runner = run.Runner(dict(), cfg)
 
     def clear_results(self):
         if self.results.exists():
             for fn in self.results.glob('*.*'):
-                fn.unlink()
-
-    def clear_gold(self):
-        if self.gold.exists():
-            for fn in self.gold.glob('*.*'):
                 fn.unlink()
 
     def remove_generated(self, results, folder):
@@ -111,32 +94,6 @@ class Test(object):
         elif self.test_type == 'vpp':
             return self.runner.sample_vpp(case_id, params, workdir, log)
 
-
-    def mine(self):
-        self.clear_gold()
-        self.gold.mkdir(parents=True, exist_ok=True)
-        total = passed = 0
-        for i, case in enumerate(self.cases, 1):
-            log = CaseLogger(self.gold / "{:04d}.log".format(i), self.cfg)
-
-            total += 1
-            print("    {:04d}".format(i), end="")
-            results = self.exec_test_tool(i, case, self.gold, log)
-
-            log.separator()
-            if results:
-                passed += 1
-                print(" - ok")
-                log.log('PASS')
-            else:
-                print(" - FAIL")
-                log.log('FAIL')
-
-            self.remove_generated(results, self.gold)
-            log.log('\nfinisned: {}'.format(datetime.datetime.now()))
-
-        return (total, passed)
-
     def run(self):
         self.clear_results()
         self.results.mkdir(parents=True, exist_ok=True)
@@ -155,36 +112,25 @@ class Test(object):
             print("    {:04d}".format(i), end="")
             results = self.exec_test_tool(i, case, self.results, log)
 
-            gold = self.gold / "{:04d}.json".format(i)
-            if not gold.exists():
-                error = "FAIL - no gold results"
+            if results:
+                passed += 1
+                log.log('PASS')
             else:
-                with gold.open() as f:
-                    gold_results = json.load(f)
-
-                if set(results.keys()) != set(gold_results.keys()):
-                    error = "FAIL (different set of generated artifacts)"
-                else:
-                    for fn in results.keys():
-                        if results[fn] != gold_results[fn]:
-                            error = ("FAIL ({}: {} vs. {} in gold)".format(
-                                fn, results[fn], gold_results[fn]
-                            ))
-                            break
-                    else:
-                        self.remove_generated(results, self.results)
-                        passed += 1
-
+                error = "fail"
+                log.log('FAIL')
+            self.remove_generated(results, self.results)
             log.separator()
             res = {
                 'id': '{:04d}'.format(i),
             }
             if error:
-                print(' - {}'.format(error))
-                log.log(error)
+                print(' - FAIL')
                 res['status'] = 'FAIL'
+                # Print log in case of the failure
+                with log.fn.open('r') as f:
+                    print(f.read())
                 res['error'] = error
-                res['gold_artifacts'] = gold_results
+                log.log(error)
                 res['artifacts'] = results
             else:
                 print(' - ok')
@@ -199,6 +145,12 @@ class Test(object):
         return (total, passed, details)
 
     def generate_cases(self):
+        self.platforms = self.config.get('platforms', None)
+        device_name = Path(self.device).name
+        if self.platforms is not None:
+            if not platform.check_platform(platform.get_current_device_id(device_name), self.platforms):
+                raise platform.UnsupportedPlatform("test is disabled for current platform")
+
         self.test_type = self.config.get('type', None)
         if self.test_type not in ['decode', 'encode', 'transcode', 'vpp']:
             raise ValidationError("unknown test type")
@@ -219,6 +171,8 @@ class Test(object):
 
         for vals in itertools.product(*values):
             case = collections.OrderedDict(zip(keys, vals))
+            case['device'] = self.device
+
             if 'stream' not in case:
                 if self.test_type != 'transcode':
                     raise ValidationError("stream is not defined")

@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2019 Intel Corporation
+// Copyright (c) 2009-2020 Intel Corporation
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,12 +34,10 @@
 #include "mfx_h264_encode_hw_utils.h"
 #include "genx_simple_me_gen8_isa.h"
 #include "genx_simple_me_gen9_isa.h"
-#include "genx_simple_me_gen10_isa.h"
 #include "genx_simple_me_gen11_isa.h"
 #include "genx_simple_me_gen11lp_isa.h"
 #include "genx_simple_me_gen12lp_isa.h"
 #include "genx_histogram_gen9_isa.h"
-#include "genx_histogram_gen10_isa.h"
 #include "genx_histogram_gen11_isa.h"
 #include "genx_histogram_gen11lp_isa.h"
 #include "genx_histogram_gen12lp_isa.h"
@@ -874,10 +872,6 @@ void CmContext::Setup(
         m_program = ReadProgram(m_device, genx_simple_me_gen9, SizeOf(genx_simple_me_gen9));
         m_programHist = ReadProgram(m_device, genx_histogram_gen9, SizeOf(genx_histogram_gen9));
         break;
-    case MFX_HW_CNL:
-        m_program = ReadProgram(m_device, genx_simple_me_gen10, SizeOf(genx_simple_me_gen10));
-        m_programHist = ReadProgram(m_device, genx_histogram_gen10, SizeOf(genx_histogram_gen10));
-        break;
     case MFX_HW_ICL:
         m_program = ReadProgram(m_device, genx_simple_me_gen11, SizeOf(genx_simple_me_gen11));
         m_programHist = ReadProgram(m_device, genx_histogram_gen11, SizeOf(genx_histogram_gen11));
@@ -888,6 +882,8 @@ void CmContext::Setup(
         m_programHist = ReadProgram(m_device, genx_histogram_gen11lp, SizeOf(genx_histogram_gen11lp));
         break;
     case MFX_HW_TGL_LP:
+    case MFX_HW_DG1:
+    case MFX_HW_RKL:
         m_program = ReadProgram(m_device, genx_simple_me_gen12lp, SizeOf(genx_simple_me_gen12lp));
         m_programHist = ReadProgram(m_device, genx_histogram_gen12lp, SizeOf(genx_histogram_gen12lp));
         break;
@@ -1247,11 +1243,11 @@ void CmContext::SetCurbeData(
 /*
     curbeData.SliceMacroblockHeightMinusOne = m_video.mfx.FrameInfo.Height / 16 - 1;
     curbeData.PictureHeightMinusOne = m_video.mfx.FrameInfo.Height / 16 - 1;
-    curbeData.PictureWidth          = m_video.mfx.FrameInfo.Width / 16;
+    curbeData.PictureWidthMinusOne  = m_video.mfx.FrameInfo.Width / 16 - 1;
 */
     curbeData.SliceMacroblockHeightMinusOne = widthLa / 16 - 1;
     curbeData.PictureHeightMinusOne = heightLa / 16 - 1;
-    curbeData.PictureWidth          = widthLa / 16;
+    curbeData.PictureWidthMinusOne  = widthLa / 16 - 1;
     //DW5
     curbeData.RefWidth              = (task.m_type[ffid] & MFX_FRAMETYPE_B) ? 32 : 48;
     curbeData.RefHeight             = (task.m_type[ffid] & MFX_FRAMETYPE_B) ? 32 : 40;
@@ -1496,7 +1492,7 @@ void CmContext::SetCurbeData(
     //DW4
     curbeData.SliceMacroblockHeightMinusOne = height / 16 - 1;
     curbeData.PictureHeightMinusOne = height / 16 - 1;
-    curbeData.PictureWidth          = width / 16;
+    curbeData.PictureWidthMinusOne  = width / 16 - 1;
     //DW5
     curbeData.RefWidth              = (frameType & MFX_FRAMETYPE_B) ? 32 : 48;
     curbeData.RefHeight             = (frameType & MFX_FRAMETYPE_B) ? 32 : 40;

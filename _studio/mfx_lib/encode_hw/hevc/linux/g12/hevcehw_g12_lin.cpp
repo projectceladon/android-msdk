@@ -28,11 +28,13 @@
 #include "hevcehw_g12_caps_lin.h"
 #include "hevcehw_g12_scc_lin.h"
 #include "hevcehw_g12_sao.h"
+#include "hevcehw_g12_qp_modulation_lin.h"
 #include "hevcehw_g12_scc.h"
 #include "hevcehw_base_legacy.h"
 #include "hevcehw_base_parser.h"
 #include "hevcehw_base_iddi_packer.h"
 #include "hevcehw_base_iddi.h"
+#include "hevcehw_base_recon_info_lin.h"
 
 namespace HEVCEHW
 {
@@ -56,6 +58,7 @@ MFXVideoENCODEH265_HW::MFXVideoENCODEH265_HW(
     newFeatures.emplace_back(new SCC(FEATURE_SCC));
     newFeatures.emplace_back(new Caps(FEATURE_CAPS));
     newFeatures.emplace_back(new SAO(FEATURE_SAO));
+    newFeatures.emplace_back(new QpModulation(FEATURE_QP_MODULATION));
 
     InternalInitFeatures(status, mode, newFeatures);
 }
@@ -120,7 +123,7 @@ void MFXVideoENCODEH265_HW::InternalInitFeatures(
             , { FEATURE_SCC, SCC::BLK_SetPPSExt });
         Reorder(
             iint
-            , { HEVCEHW::Base::FEATURE_LEGACY, Base::Legacy::BLK_SetRecInfo }
+            , { HEVCEHW::Base::FEATURE_RECON_INFO, HEVCEHW::Base::ReconInfo::BLK_SetRecInfo }
             , { FEATURE_REXT, RExt::BLK_SetRecInfo }
             , PLACE_AFTER);
     }

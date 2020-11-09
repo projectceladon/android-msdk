@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2019 Intel Corporation
+// Copyright (c) 2018-2020 Intel Corporation
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,10 @@
 #include "vm_time.h"
 #include "asc.h"
 
+#ifdef MXF_ENABLE_MCTF_IN_AVC
+#include "cmvm.h"
+#include "mctf_common.h"
+#endif
 
 #ifndef _MFX_H264_ENCODE_HW_UTILS_H_
 #define _MFX_H264_ENCODE_HW_UTILS_H_
@@ -49,6 +53,7 @@
 #define MFX_ARRAY_SIZE(ARR) (sizeof(ARR)/sizeof(ARR[0]))
 const int MFX_MAX_DIRTY_RECT_COUNT = MFX_ARRAY_SIZE(mfxExtDirtyRect::Rect);
 const int MFX_MAX_MOVE_RECT_COUNT = MFX_ARRAY_SIZE(mfxExtMoveRect::Rect);
+const int DEFAULT_PPYR_INTERVAL = 3;
 
 
 namespace MfxHwH264Encode
@@ -291,9 +296,17 @@ namespace MfxHwH264Encode
         mfxExtCodingOptionDDI const * extDdi,
         mfxU8                         frameType);
 
-    mfxU8 GetQpValue(
+    mfxU8 GetPFrameLevel(
+        mfxU32 i,
+        mfxU32 num);
+
+    mfxU8 PLayer(
         MfxVideoParam const & par,
-        mfxEncodeCtrl const & ctrl,
+        mfxU32                order);
+
+    mfxU8 GetQpValue(
+        DdiTask const &       task,
+        MfxVideoParam const & par,
         mfxU32                frameType);
 
     PairU16 GetPicStruct(
@@ -944,6 +957,7 @@ namespace MfxHwH264Encode
             , m_vmeData(0)
             , m_fwdRef(0)
             , m_bwdRef(0)
+            , m_cmRawForMCTF(0)
             , m_fieldPicFlag(0)
             , m_singleFieldMode(false)
             , m_fieldCounter(0)
@@ -984,6 +998,7 @@ namespace MfxHwH264Encode
             , m_LtrQp(0)
             , m_RefOrder(-1)
             , m_RefQp(0)
+            , m_bFrameReady(false)
             , m_idxScd(0)
             , m_wsSubSamplingEv(0)
             , m_wsSubSamplingTask(0)
@@ -1173,6 +1188,8 @@ namespace MfxHwH264Encode
         DdiTask const * m_fwdRef;
         DdiTask const * m_bwdRef;
 
+        CmSurface2D *   m_cmRawForMCTF; // CM surface made of m_handleRaw for MCTF
+
         mfxU8   m_fieldPicFlag;    // true for frames with interlaced content
         bool    m_singleFieldMode; // true for FEI single-field processing mode
 
@@ -1237,6 +1254,8 @@ namespace MfxHwH264Encode
         mfxI32 m_LtrQp;
         mfxI32 m_RefOrder;
         mfxI32 m_RefQp;
+
+        bool           m_bFrameReady;
         mfxU32         m_idxScd;
         CmEvent       *m_wsSubSamplingEv;
         CmTask        *m_wsSubSamplingTask;
@@ -1800,6 +1819,8 @@ namespace MfxHwH264Encode
             STG_ACCEPT_FRAME,
             STG_START_SCD,
             STG_WAIT_SCD,
+            STG_START_MCTF,
+            STG_WAIT_MCTF,
             STG_START_LA,
             STG_WAIT_LA,
             STG_START_HIST,
@@ -1814,6 +1835,8 @@ namespace MfxHwH264Encode
             STG_BIT_ACCEPT_FRAME  = 1 << STG_ACCEPT_FRAME,
             STG_BIT_START_SCD     = 1 << STG_START_SCD,
             STG_BIT_WAIT_SCD      = 1 << STG_WAIT_SCD,
+            STG_BIT_START_MCTF    = 1 << STG_START_MCTF,
+            STG_BIT_WAIT_MCTF     = 1 << STG_WAIT_MCTF,
             STG_BIT_START_LA      = 1 << STG_START_LA,
             STG_BIT_WAIT_LA       = 1 << STG_WAIT_LA,
             STG_BIT_START_HIST    = 1 << STG_START_HIST,
@@ -1965,6 +1988,20 @@ namespace MfxHwH264Encode
         }
 
     protected:
+#if defined(MXF_ENABLE_MCTF_IN_AVC)
+        std::shared_ptr<CMC>
+            amtMctf;
+
+        mfxStatus SubmitToMctf(
+            DdiTask * pTask,
+            bool      isSceneChange,
+            bool      doIntraFiltering
+        );
+        mfxStatus QueryFromMctf(
+            void *pParam,
+            bool bEoF
+        );
+#endif
         ASC       amtScd;
         mfxStatus SCD_Put_Frame(
             DdiTask & newTask);
@@ -2002,6 +2039,9 @@ namespace MfxHwH264Encode
         void OnScdQueried();
         void OnScdFinished();
 
+        void SubmitMCTF();
+        void OnMctfQueried();
+        void OnMctfFinished();
 
         void OnLookaheadSubmitted(DdiTaskIter task);
 
@@ -2073,6 +2113,8 @@ namespace MfxHwH264Encode
         std::list<DdiTask>  m_incoming;
         std::list<DdiTask>  m_ScDetectionStarted;
         std::list<DdiTask>  m_ScDetectionFinished;
+        std::list<DdiTask>  m_MctfStarted;
+        std::list<DdiTask>  m_MctfFinished;
         std::list<DdiTask>  m_reordering;
         std::list<DdiTask>  m_lookaheadStarted;
         std::list<DdiTask>  m_lookaheadFinished;
