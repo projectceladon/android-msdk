@@ -249,7 +249,7 @@ mfxStatus VideoDECODEH265::Init(mfxVideoParam *par)
         {
             MFX_CHECK(m_vPar.mfx.FrameInfo.PicStruct == MFX_PICSTRUCT_PROGRESSIVE, MFX_ERR_UNSUPPORTED);
         }
-        MFX_CHECK(par->mfx.FrameInfo.FourCC == videoProcessing->Out.FourCC, MFX_ERR_UNSUPPORTED);//This is to avoid CSC cases, will remove once CSC is fully tested
+
 		bool is_fourcc_supported = false;
         if (m_core->GetHWType() < MFX_HW_TGL_LP)
         {
@@ -687,6 +687,23 @@ mfxStatus VideoDECODEH265::DecodeHeader(VideoCORE *core, mfxBitstream *bs, mfxVi
     umcRes = FillParam(core, &decoder, par, false);
     MFX_CHECK(umcRes == UMC::UMC_OK, ConvertUMCStatusToMfx(umcRes));
 
+    mfxExtCodingOptionVPS * extVps = (mfxExtCodingOptionVPS *)GetExtendedBuffer(par->ExtParam, par->NumExtParam, MFX_EXTBUFF_CODING_OPTION_VPS);
+    if (extVps)
+    {
+        RawHeader_H265 *vps = decoder.GetVPS();
+
+        if (vps->GetSize())
+        {
+            MFX_CHECK(extVps->VPSBufSize >= vps->GetSize(), MFX_ERR_NOT_ENOUGH_BUFFER);
+            extVps->VPSBufSize = (mfxU16)vps->GetSize();
+            std::copy(vps->GetPointer(), vps->GetPointer() + extVps->VPSBufSize, extVps->VPSBuffer);
+        }
+        else
+        {
+            extVps->VPSBufSize = 0;
+        }
+    }
+
     mfxExtCodingOptionSPSPPS * spsPps = (mfxExtCodingOptionSPSPPS *)GetExtendedBuffer(par->ExtParam, par->NumExtParam, MFX_EXTBUFF_CODING_OPTION_SPSPPS);
     if (spsPps)
     {
@@ -1088,6 +1105,16 @@ mfxStatus VideoDECODEH265::DecodeFrameCheck(mfxBitstream *bs, mfxFrameSurface1 *
 
         MFXMediaDataAdapter src(bs);
 
+#if (MFX_VERSION >= 1025)
+        mfxExtBuffer* extbuf = (bs) ? GetExtendedBuffer(bs->ExtParam, bs->NumExtParam, MFX_EXTBUFF_DECODE_ERROR_REPORT) : NULL;
+
+        if (extbuf)
+        {
+            reinterpret_cast<mfxExtDecodeErrorReport *>(extbuf)->ErrorTypes = 0;
+            src.SetExtBuffer(extbuf);
+        }
+#endif
+
         for (;;)
         {
             if (m_FrameAllocator->FindFreeSurface() == -1)
@@ -1382,11 +1409,7 @@ mfxStatus VideoDECODEH265::DecodeFrame(mfxFrameSurface1 *surface_out, H265Decode
     {
         index = m_FrameAllocator->FindSurface(surface_out, m_isOpaq);
         pFrame = m_pH265VideoDecoder->FindSurface((UMC::FrameMemID)index);
-        if (!pFrame)
-        {
-            VM_ASSERT(false);
-            MFX_RETURN(MFX_ERR_NOT_FOUND);
-        }
+        MFX_CHECK(pFrame, MFX_ERR_NOT_FOUND);
     }
 
     surface_out->Data.Corrupted = 0;

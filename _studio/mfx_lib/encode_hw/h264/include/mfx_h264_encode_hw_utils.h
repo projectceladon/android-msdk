@@ -2371,11 +2371,17 @@ public:
         par.DisplayOrder = dispOrder;
         std::vector<mfxExtBuffer*> extParams;
 
-        mfxEncToolsBRCQuantControl extFrameQP;
+        mfxEncToolsBRCQuantControl extFrameQP = {} ;
         extFrameQP.Header.BufferId = MFX_EXTBUFF_ENCTOOLS_BRC_QUANT_CONTROL;
         extFrameQP.Header.BufferSz = sizeof(extFrameQP);
 
         extParams.push_back((mfxExtBuffer *)&extFrameQP);
+        
+        mfxEncToolsBRCHRDPos extHRDPos = {};
+        extHRDPos.Header.BufferId = MFX_EXTBUFF_ENCTOOLS_BRC_HRD_POS;
+        extHRDPos.Header.BufferSz = sizeof(extHRDPos);
+        extParams.push_back((mfxExtBuffer *)&extHRDPos);
+        
         par.ExtParam = &extParams[0];
         par.NumExtParam = (mfxU16)extParams.size();
 
@@ -2387,6 +2393,10 @@ public:
         frame_ctrl->MaxFrameSize = extFrameQP.MaxFrameSize;
         std::copy(extFrameQP.DeltaQP, extFrameQP.DeltaQP + 8, frame_ctrl->DeltaQP);
         frame_ctrl->MaxNumRepak = extFrameQP.NumDeltaQP;
+        
+        frame_ctrl->InitialCpbRemovalDelay = extHRDPos.InitialCpbRemovalDelay;
+        frame_ctrl->InitialCpbRemovalOffset = extHRDPos.InitialCpbRemovalDelayOffset;
+        
         return sts;
     }
 
@@ -2891,7 +2901,8 @@ private:
         mfxStatus BuildPPyr(
             DdiTask & task,
             mfxU32 pyrWidth,
-            bool bLastFrameUsing);
+            bool bLastFrameUsing,
+            bool bResetPyr);
         void setFrameInfo(DdiTask & task,
             mfxU32    fid);
         void      AssignDecodeTimeStamp(
@@ -3021,6 +3032,7 @@ private:
         mfxU32      m_frameOrderIdrInDisplayOrder;    // frame order of last IDR frame (in display order)
         mfxU32      m_frameOrderIntraInDisplayOrder;  // frame order of last I frame (in display order)
         mfxU32      m_frameOrderIPInDisplayOrder;  // frame order of last I or P frame (in display order)
+        mfxU32      m_frameOrderPyrStart;          // frame order of the first frame of pyramid
         mfxU32      m_miniGopCount;
         mfxU32      m_frameOrderStartTScalStructure; // starting point of temporal scalability structure
 

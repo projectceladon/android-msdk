@@ -71,9 +71,9 @@ void PrintHelp(msdk_char *strAppName, const msdk_char *strErrorMessage, ...)
     msdk_printf(MSDK_STRING("   [-dGfx] - preffer processing on dGfx (by default system decides)\n"));
     msdk_printf(MSDK_STRING("   [-iGfx] - preffer processing on iGfx (by default system decides)\n"));
 #endif
-    msdk_printf(MSDK_STRING("   [-nv12|yuy2|uyvy|ayuv|rgb4|p010|y210|y410|a2rgb10|p016|y216] - input color format (by default YUV420 is expected).\n"));
+    msdk_printf(MSDK_STRING("   [-nv12|nv16|yuy2|uyvy|ayuv|rgb4|p010|y210|y410|a2rgb10|p016|p210|y216] - input color format (by default YUV420 is expected).\n"));
     msdk_printf(MSDK_STRING("   [-msb10] - 10-bit color format is expected to have data in Most Significant Bits of words.\n                 (LSB data placement is expected by default).\n                 This option also disables data shifting during file reading.\n"));
-    msdk_printf(MSDK_STRING("   [-ec::p010] - force usage of P010 surfaces for encoder (conversion will be made if necessary). Use for 10 bit HEVC encoding\n"));
+    msdk_printf(MSDK_STRING("   [-ec::p010|yuy2|nv12|nv16|rgb4|ayuv|uyvy|y210|y410|p016|y216] - force output color format for encoder (conversion will be made if necessary). Default value: input color format\n"));
     msdk_printf(MSDK_STRING("   [-tff|bff] - input stream is interlaced, top|bottom fielf first, if not specified progressive is expected\n"));
     msdk_printf(MSDK_STRING("   [-bref] - arrange B frames in B pyramid reference structure\n"));
     msdk_printf(MSDK_STRING("   [-nobref] -  do not use B-pyramid (by default the decision is made by library)\n"));
@@ -170,6 +170,7 @@ void PrintHelp(msdk_char *strAppName, const msdk_char *strErrorMessage, ...)
     msdk_printf(MSDK_STRING("   [-WeightedBiPred:default|implicit ] - enables weighted bi-prediction mode\n"));
     msdk_printf(MSDK_STRING("   [-timeout]               - encoding in cycle not less than specific time in seconds\n"));
     msdk_printf(MSDK_STRING("   [-perf_opt n]            - sets number of prefetched frames. In performance mode app preallocates buffer and loads first n frames\n"));
+    msdk_printf(MSDK_STRING("   [-fps]                   - limits overall fps of pipeline\n"));
     msdk_printf(MSDK_STRING("   [-uncut]                 - do not cut output file in looped mode (in case of -timeout option)\n"));
     msdk_printf(MSDK_STRING("   [-dump fileName]         - dump MSDK components configuration to the file in text form\n"));
     msdk_printf(MSDK_STRING("   [-qpfile <filepath>]     - if specified, the encoder will take frame parameters (frame number, QP, frame type) from text file\n"));
@@ -299,18 +300,78 @@ mfxStatus ParseAdditionalParams(msdk_char *strInput[], mfxU8 nArgNum, mfxU8& i, 
     {
         pParams->nRateControlMethod = MFX_RATECONTROL_VCM;
     }
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-p210")))
+    {
+        pParams->FileInputFourCC = MFX_FOURCC_P210;
+    }
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-nv16")))
+    {
+        pParams->FileInputFourCC = MFX_FOURCC_NV16;
+    }
 #if (MFX_VERSION >= 1031)
     else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-p016")))
     {
         pParams->FileInputFourCC = MFX_FOURCC_P016;
-        pParams->EncodeFourCC = MFX_FOURCC_P016;
     }
     else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-y216")))
     {
         pParams->FileInputFourCC = MFX_FOURCC_Y216;
+    }
+#endif
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-ec::yuy2")))
+    {
+        pParams->EncodeFourCC = MFX_FOURCC_YUY2;
+    }
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-ec::nv12")))
+    {
+        pParams->EncodeFourCC = MFX_FOURCC_NV12;
+    }
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-ec::rgb4")))
+    {
+        pParams->EncodeFourCC = MFX_FOURCC_RGB4;
+    }
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-ec::ayuv")))
+    {
+        pParams->EncodeFourCC = MFX_FOURCC_AYUV;
+    }
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-ec::uyvy")))
+    {
+        pParams->EncodeFourCC = MFX_FOURCC_UYVY;
+    }
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-ec::nv16")))
+    {
+        pParams->EncodeFourCC = MFX_FOURCC_NV16;
+    }
+#if (MFX_VERSION >= 1027)
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-ec::y210")))
+    {
+        pParams->EncodeFourCC = MFX_FOURCC_Y210;
+    }
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-ec::y410")))
+    {
+        pParams->EncodeFourCC = MFX_FOURCC_Y410;
+    }
+#endif
+#if (MFX_VERSION >= 1031)
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-ec::p016")))
+    {
+        pParams->EncodeFourCC = MFX_FOURCC_P016;
+    }
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-ec::y216")))
+    {
         pParams->EncodeFourCC = MFX_FOURCC_Y216;
     }
 #endif
+    else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-fps")))
+    {
+        VAL_CHECK(i+1 >= nArgNum, i, strInput[i]);
+
+        if (MFX_ERR_NONE != msdk_opt_read(strInput[++i], pParams->nMaxFPS))
+        {
+            PrintHelp(strInput[0], MSDK_STRING("overall fps is invalid"));
+            return MFX_ERR_UNSUPPORTED;
+        }
+    }
     else
     {
         return MFX_ERR_NOT_FOUND;
@@ -336,7 +397,7 @@ mfxStatus ParseInputString(msdk_char* strInput[], mfxU8 nArgNum, sInputParams* p
     pParams->isV4L2InputEnabled = false;
     pParams->nNumFrames = 0;
     pParams->FileInputFourCC = MFX_FOURCC_I420;
-    pParams->EncodeFourCC = MFX_FOURCC_NV12;
+    pParams->EncodeFourCC = 0;
     pParams->nPRefType = MFX_P_REF_DEFAULT;
     pParams->QPFileMode = false;
     pParams->BitrateLimit = MFX_CODINGOPTION_OFF;
@@ -445,7 +506,6 @@ mfxStatus ParseInputString(msdk_char* strInput[], mfxU8 nArgNum, sInputParams* p
         else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-yuy2")))
         {
             pParams->FileInputFourCC = MFX_FOURCC_YUY2;
-            pParams->EncodeFourCC = MFX_FOURCC_YUY2;
         }
         else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-nv12")))
         {
@@ -454,40 +514,32 @@ mfxStatus ParseInputString(msdk_char* strInput[], mfxU8 nArgNum, sInputParams* p
         else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-rgb4")))
         {
             pParams->FileInputFourCC = MFX_FOURCC_RGB4;
-            pParams->EncodeFourCC = MFX_FOURCC_RGB4;
         }
         else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-p010")))
         {
             pParams->FileInputFourCC = MFX_FOURCC_P010;
-            pParams->EncodeFourCC = MFX_FOURCC_P010;
         }
         else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-ayuv")))
         {
             pParams->FileInputFourCC = MFX_FOURCC_AYUV;
-            pParams->EncodeFourCC = MFX_FOURCC_AYUV;
         }
         else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-uyvy")))
         {
             pParams->FileInputFourCC = MFX_FOURCC_UYVY;
-            // use YUY2 to get chroma subsampling 4:2:2 in encoded image
-            pParams->EncodeFourCC = MFX_FOURCC_YUY2;
         }
 #if (MFX_VERSION >= 1027)
         else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-y210")))
         {
             pParams->FileInputFourCC = MFX_FOURCC_Y210;
-            pParams->EncodeFourCC = MFX_FOURCC_Y210;
         }
         else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-y410")))
         {
             pParams->FileInputFourCC = MFX_FOURCC_Y410;
-            pParams->EncodeFourCC = MFX_FOURCC_Y410;
         }
 #endif
         else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-a2rgb10")))
         {
             pParams->FileInputFourCC = MFX_FOURCC_A2RGB10;
-            pParams->EncodeFourCC = MFX_FOURCC_A2RGB10;
         }
         else if (0 == msdk_strcmp(strInput[i], MSDK_STRING("-ec::p010")))
         {
@@ -1366,8 +1418,19 @@ mfxStatus ParseInputString(msdk_char* strInput[], mfxU8 nArgNum, sInputParams* p
         return MFX_ERR_UNSUPPORTED;
     }
 
+    if (!pParams->EncodeFourCC)
+    {
+        if (pParams->FileInputFourCC == MFX_FOURCC_UYVY)
+            // use YUY2 to get chroma subsampling 4:2:2 in encoded image
+            pParams->EncodeFourCC = MFX_FOURCC_YUY2;
+        else if (pParams->FileInputFourCC == MFX_FOURCC_I420)
+            pParams->EncodeFourCC = MFX_FOURCC_NV12;
+        else
+            pParams->EncodeFourCC = pParams->FileInputFourCC;
+    }
+
     if (MFX_CODEC_JPEG != pParams->CodecId && MFX_CODEC_HEVC != pParams->CodecId &&
-        pParams->FileInputFourCC == MFX_FOURCC_YUY2 &&
+        pParams->EncodeFourCC == MFX_FOURCC_YUY2 &&
         !pParams->isV4L2InputEnabled)
     {
         PrintHelp(strInput[0], MSDK_STRING("-yuy2 option is supported only for JPEG or HEVC encoder"));

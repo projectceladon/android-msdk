@@ -235,7 +235,6 @@ mfxStatus MFXHWVideoENCODEH264::QueryIOSurf(
     if (IsMvcProfile(par->mfx.CodecProfile) && !IsHwMvcEncSupported())
         return MFX_WRN_PARTIAL_ACCELERATION;
 
-
     return ImplementationAvc::QueryIOSurf(core, par, request);
 }
 
@@ -249,16 +248,9 @@ mfxStatus ImplementationAvc::Query(
 
     mfxStatus sts;
 
-
     // "in" parameters should uniquely identify one of 4 Query operation modes (see MSDK spec for details)
     mfxU8 queryMode = DetermineQueryMode(in);
-    //sts = core->IsGuidSupported(DXVA2_Intel_Encode_AVC,out,true);
-    //if (sts != MFX_ERR_NONE){
-    //    return MFX_ERR_DEVICE_FAILED;
-    //}
-    if (queryMode == 0)
-        return MFX_ERR_UNDEFINED_BEHAVIOR; // input parameters are contradictory and don't allow to choose Query mode
-
+    MFX_CHECK(queryMode, MFX_ERR_UNDEFINED_BEHAVIOR); // input parameters are contradictory and don't allow to choose Query mode
 
     if (queryMode == 1) // see MSDK spec for details related to Query mode 1
     {
@@ -343,10 +335,7 @@ mfxStatus ImplementationAvc::Query(
         }
         if (mfxExtEncoderCapability * extCap = GetExtBuffer(*out))
         {
-            if(MFX_HW_VAAPI == core->GetVAType())
-            {
-                return MFX_ERR_UNSUPPORTED;
-            }
+            MFX_CHECK(MFX_HW_VAAPI != core->GetVAType(), MFX_ERR_UNSUPPORTED);
         }
 
 #ifdef MFX_ENABLE_MFE
@@ -380,7 +369,12 @@ mfxStatus ImplementationAvc::Query(
             sts = QueryHwCaps(core, hwCaps, &tmp);
 
         if (sts != MFX_ERR_NONE)
-            return IsOn(in->mfx.LowPower)? MFX_ERR_UNSUPPORTED: MFX_WRN_PARTIAL_ACCELERATION;
+        {
+            if (IsOn(in->mfx.LowPower))
+                MFX_RETURN(MFX_ERR_UNSUPPORTED)
+            else
+                MFX_RETURN(MFX_WRN_PARTIAL_ACCELERATION)
+        }
 
         sts = ReadSpsPpsHeaders(tmp);
         MFX_CHECK_STS(sts);
@@ -391,7 +385,7 @@ mfxStatus ImplementationAvc::Query(
         mfxStatus checkSts = CheckVideoParamQueryLike(tmp, hwCaps, platfrom, core->GetVAType(), *pMFXGTConfig);
 
         if (checkSts == MFX_WRN_PARTIAL_ACCELERATION)
-            return MFX_WRN_PARTIAL_ACCELERATION;
+            MFX_RETURN(MFX_WRN_PARTIAL_ACCELERATION)
         else if (checkSts == MFX_ERR_INCOMPATIBLE_VIDEO_PARAM)
             checkSts = MFX_ERR_UNSUPPORTED;
         else if (checkSts == MFX_ERR_NONE && lpSts != MFX_ERR_NONE) // transfer MFX_WRN_INCOMPATIBLE_VIDEO_PARAM to upper level
@@ -419,10 +413,8 @@ mfxStatus ImplementationAvc::Query(
         }
 
         // should have same number of buffers
-        if (in->NumExtParam != out->NumExtParam || !in->ExtParam != !out->ExtParam)
-        {
-            return MFX_ERR_UNSUPPORTED;
-        }
+        MFX_CHECK((in->NumExtParam == out->NumExtParam) && ((!in->ExtParam) == (!out->ExtParam)),
+        MFX_ERR_UNSUPPORTED);
 
         // should have same buffers
         if (in->ExtParam && out->ExtParam)
@@ -440,47 +432,37 @@ mfxStatus ImplementationAvc::Query(
                     if (IsRunTimeOnlyExtBuffer(in->ExtParam[i]->BufferId))
                         continue; // it's runtime only ext buffer. Nothing to check or correct, just move on.
 
+                    MFX_CHECK(IsVideoParamExtBufferIdSupported(in->ExtParam[i]->BufferId),
+                    MFX_ERR_UNSUPPORTED);
 
-                    if (!IsVideoParamExtBufferIdSupported(in->ExtParam[i]->BufferId))
-                        return MFX_ERR_UNSUPPORTED;
-
-                    if (MfxHwH264Encode::GetExtBuffer(
+                    // buffer present twice in 'in'
+                    MFX_CHECK (MfxHwH264Encode::GetExtBuffer(
                         in->ExtParam + i + 1,
                         in->NumExtParam - i - 1,
-                        in->ExtParam[i]->BufferId) != 0)
+                        in->ExtParam[i]->BufferId) == 0, MFX_ERR_UNDEFINED_BEHAVIOR);
+
+                    mfxExtBuffer * buf = GetExtBuffer(out->ExtParam, out->NumExtParam, in->ExtParam[i]->BufferId);
+                    MFX_CHECK(buf, MFX_ERR_UNDEFINED_BEHAVIOR); // buffer doesn't present in 'out'
+
+                    mfxExtBuffer * corrected = GetExtBuffer(tmp.ExtParam, tmp.NumExtParam, in->ExtParam[i]->BufferId);
+                    MFX_CHECK_NULL_PTR1(corrected);
+
+                    if (buf->BufferId == MFX_EXTBUFF_MVC_SEQ_DESC)
                     {
-                        // buffer present twice in 'in'
-                        return MFX_ERR_UNDEFINED_BEHAVIOR;
-                    }
+                        // mfxExtMVCSeqDesc is complex structure
+                        // deep-copy is required if mvc description is fully initialized
+                        mfxExtMVCSeqDesc & src = *(mfxExtMVCSeqDesc *)corrected;
+                        mfxExtMVCSeqDesc & dst = *(mfxExtMVCSeqDesc *)buf;
 
-                    if (mfxExtBuffer * buf = GetExtBuffer(out->ExtParam, out->NumExtParam, in->ExtParam[i]->BufferId))
-                    {
-                        mfxExtBuffer * corrected = GetExtBuffer(tmp.ExtParam, tmp.NumExtParam, in->ExtParam[i]->BufferId);
-                        MFX_CHECK_NULL_PTR1(corrected);
+                        sts = CheckBeforeCopyQueryLike(dst, src);
+                        MFX_CHECK(sts == MFX_ERR_NONE, MFX_ERR_UNSUPPORTED);
 
-                        if (buf->BufferId == MFX_EXTBUFF_MVC_SEQ_DESC)
-                        {
-                            // mfxExtMVCSeqDesc is complex structure
-                            // deep-copy is required if mvc description is fully initialized
-                            mfxExtMVCSeqDesc & src = *(mfxExtMVCSeqDesc *)corrected;
-                            mfxExtMVCSeqDesc & dst = *(mfxExtMVCSeqDesc *)buf;
-
-                            sts = CheckBeforeCopyQueryLike(dst, src);
-                            if (sts != MFX_ERR_NONE)
-                                return MFX_ERR_UNSUPPORTED;
-
-                            Copy(dst, src);
-                        }
-                        else
-                        {
-                            // shallow-copy
-                            MFX_INTERNAL_CPY(buf, corrected, corrected->BufferSz);
-                        }
+                        Copy(dst, src);
                     }
                     else
                     {
-                        // buffer doesn't present in 'out'
-                        return MFX_ERR_UNDEFINED_BEHAVIOR;
+                        // shallow-copy
+                        MFX_INTERNAL_CPY(buf, corrected, corrected->BufferSz);
                     }
                 }
             }
@@ -488,7 +470,7 @@ mfxStatus ImplementationAvc::Query(
             for (mfxU32 i = 0; i < out->NumExtParam; i++)
             {
                 if (out->ExtParam[i] && GetExtBuffer(in->ExtParam, in->NumExtParam, out->ExtParam[i]->BufferId) == 0)
-                    return MFX_ERR_UNSUPPORTED;
+                    MFX_RETURN(MFX_ERR_UNSUPPORTED);
             }
         }
 
@@ -497,8 +479,8 @@ mfxStatus ImplementationAvc::Query(
     else if (queryMode == 3)  // see MSDK spec for details related to Query mode 3
     {
         mfxStatus checkSts = MFX_ERR_NONE;
-        if (state == 0)
-            return MFX_ERR_UNDEFINED_BEHAVIOR; // encoder isn't initialized. Query() can't operate in mode 3
+        // encoder isn't initialized. Query() can't operate in mode 3
+        MFX_CHECK(state, MFX_ERR_UNDEFINED_BEHAVIOR);
 
         checkSts = CheckExtBufferId(*in);
         MFX_CHECK_STS(checkSts);
@@ -510,8 +492,7 @@ mfxStatus ImplementationAvc::Query(
         ImplementationAvc * AVCEncoder = (ImplementationAvc*)state;
 
         checkSts = AVCEncoder->ProcessAndCheckNewParameters(newPar, isBRCReset, isIdrRequired);
-        if (checkSts < MFX_ERR_NONE)
-            return checkSts;
+        MFX_CHECK(checkSts >= MFX_ERR_NONE, checkSts);
 
         mfxExtEncoderResetOption * extResetOptIn = GetExtBuffer(*in);
         mfxExtEncoderResetOption * extResetOptOut = GetExtBuffer(*out);
@@ -532,9 +513,10 @@ mfxStatus ImplementationAvc::Query(
         mfxU32 mbPerSec[16] = {0, };
         // let use dedault values if input resolution is 0x0, 1920x1088 - should cover almost all cases
         out->mfx.TargetUsage = in->mfx.TargetUsage == 0 ? 4: in->mfx.TargetUsage;
+
         mfxExtEncoderCapability * extCaps = GetExtBuffer(*out);
-        if (extCaps == 0)
-            return MFX_ERR_UNDEFINED_BEHAVIOR; // can't return MB processing rate since mfxExtEncoderCapability isn't attached to "out"
+        // can't return MB processing rate since mfxExtEncoderCapability isn't attached to "out"
+        MFX_CHECK(extCaps, MFX_ERR_UNDEFINED_BEHAVIOR);
 
         MfxVideoParam tmp = *in;
         eMFXHWType platfrom = core->GetHWType();
@@ -543,24 +525,19 @@ mfxStatus ImplementationAvc::Query(
         // query MB processing rate from driver
         sts = QueryMbProcRate(core, *out, mbPerSec, &tmp);
         if (IsOn(in->mfx.LowPower) && sts != MFX_ERR_NONE)
-            return MFX_ERR_UNSUPPORTED;
+            MFX_RETURN(MFX_ERR_UNSUPPORTED);
 
         if (sts != MFX_ERR_NONE)
         {
             extCaps->MBPerSec = 0;
-            if (sts == MFX_ERR_UNSUPPORTED)
-                return sts; // driver don't support reporting of MB processing rate
-
-            return MFX_WRN_PARTIAL_ACCELERATION; // any other HW problem
+            // driver don't support reporting of MB processing rate
+            MFX_CHECK(sts != MFX_ERR_UNSUPPORTED, MFX_ERR_UNSUPPORTED);
+            MFX_RETURN(MFX_WRN_PARTIAL_ACCELERATION); // any other HW problem
         }
 
         extCaps->MBPerSec = mbPerSec[out->mfx.TargetUsage-1];
-
-        if (extCaps->MBPerSec == 0)
-        {
-            // driver returned status OK and MAX_MB_PER_SEC = 0. Treat this as driver doesn't support reporting of MAX_MB_PER_SEC for requested encoding configuration
-            return MFX_ERR_UNSUPPORTED;
-        }
+        // driver returned status OK and MAX_MB_PER_SEC = 0. Treat this as driver doesn't support reporting of MAX_MB_PER_SEC for requested encoding configuration
+        MFX_CHECK(extCaps->MBPerSec, MFX_ERR_UNSUPPORTED);
 
         return MFX_ERR_NONE;
     }
@@ -597,7 +574,7 @@ mfxStatus ImplementationAvc::QueryIOSurf(
     mfxStatus sts = QueryHwCaps(core, hwCaps, &tmp);
     if (IsOn(par->mfx.LowPower) && sts != MFX_ERR_NONE)
     {
-        return MFX_ERR_UNSUPPORTED;
+        MFX_RETURN(MFX_ERR_UNSUPPORTED);
     }
 
     sts = ReadSpsPpsHeaders(tmp);
@@ -607,8 +584,7 @@ mfxStatus ImplementationAvc::QueryIOSurf(
     MFX_CHECK_STS(sts);
 
     sts = CopySpsPpsToVideoParam(tmp);
-    if (sts < MFX_ERR_NONE)
-        return sts;
+    MFX_CHECK(sts >= MFX_ERR_NONE, sts);
 
     eMFXGTConfig* pMFXGTConfig = QueryCoreInterface<eMFXGTConfig>(core, MFXICORE_GT_CONFIG_GUID);
     MFX_CHECK(pMFXGTConfig != nullptr, MFX_ERR_NULL_PTR);
@@ -616,7 +592,7 @@ mfxStatus ImplementationAvc::QueryIOSurf(
     mfxStatus checkSts = CheckVideoParamQueryLike(tmp, hwCaps, platfrom, core->GetVAType(), *pMFXGTConfig);
     MFX_CHECK(checkSts != MFX_ERR_UNSUPPORTED, MFX_ERR_UNSUPPORTED);
     if (checkSts == MFX_WRN_PARTIAL_ACCELERATION)
-        return MFX_WRN_PARTIAL_ACCELERATION; // return immediately
+        MFX_RETURN(MFX_WRN_PARTIAL_ACCELERATION) // return immediately
     else if (checkSts == MFX_ERR_NONE && lpSts != MFX_ERR_NONE)
         checkSts = lpSts;
 
@@ -659,6 +635,7 @@ ImplementationAvc::ImplementationAvc(VideoCORE * core)
 , m_frameOrderIdrInDisplayOrder(0)
 , m_frameOrderIntraInDisplayOrder(0)
 , m_frameOrderIPInDisplayOrder(0)
+, m_frameOrderPyrStart(0)
 , m_miniGopCount(0)
 , m_frameOrderStartTScalStructure(0)
 , m_baseLayerOrderStartIntraRefresh(0)
@@ -1249,6 +1226,7 @@ mfxStatus ImplementationAvc::Init(mfxVideoParam * par)
     m_frameOrderIdrInDisplayOrder = 0;
     m_frameOrderIntraInDisplayOrder = 0;
     m_frameOrderIPInDisplayOrder = 0;
+    m_frameOrderPyrStart = 0;
     m_miniGopCount = 0;
     m_frameOrderStartTScalStructure = 0;
 
@@ -1582,6 +1560,7 @@ mfxStatus ImplementationAvc::Reset(mfxVideoParam *par)
         m_baseLayerOrder              = 0;
         m_frameOrderIdrInDisplayOrder = 0;
         m_frameOrderIntraInDisplayOrder = 0;
+        m_frameOrderPyrStart = 0;
         m_frameOrderIPInDisplayOrder = 0;
         m_miniGopCount = 0;
         m_frameOrderStartTScalStructure = 0;
@@ -2231,12 +2210,53 @@ inline void AddRefInRejectedList(DdiTask & task, mfxU32 distFromIntra, mfxU32 di
         numRejected++;
     }
 }
-mfxStatus ImplementationAvc::BuildPPyr(DdiTask & task, mfxU32 pyrWidth, bool bLastFrameUsing)
+static void StartNewPyr(DdiTask & task, DdiTask & lastTask, mfxU32 numRefActiveP, bool bLastFrameUsing, mfxU32 &numRejected)
 {
-    mfxExtCodingOption3 const & extOpt3 = GetExtBufferRef(m_video);
+    mfxU32 maxKeyRef = numRefActiveP;
+
+    std::vector <mfxU32> keyRefs;
+    bool bNonKeyLastRef = false;
+
+    for (mfxU32 i = 0; i < lastTask.m_dpbPostEncoding.Size(); i++)
+    {
+        mfxU32 diff = task.m_frameOrder - lastTask.m_dpbPostEncoding[i].m_frameOrder;
+        if (lastTask.m_dpbPostEncoding[i].m_keyRef)
+        {
+            //store key frames list
+            keyRefs.push_back(task.m_frameOrder - lastTask.m_dpbPostEncoding[i].m_frameOrder);
+        }
+        else if (!bLastFrameUsing || diff != 1)
+        {
+            //reject non key frames exept previous frame (if bLastFrameUsing mode)
+            task.m_internalListCtrl.RejectedRefList[numRejected].FrameOrder = lastTask.m_dpbPostEncoding[i].m_frameOrder;
+            task.m_internalListCtrl.RejectedRefList[numRejected].PicStruct = MFX_PICSTRUCT_PROGRESSIVE;
+            numRejected++;
+        }
+        else
+            bNonKeyLastRef = true;
+    }
+
+    if (maxKeyRef > 1 && bNonKeyLastRef)
+        maxKeyRef--;
+
+    if (keyRefs.size() > maxKeyRef)
+    {
+        std::sort(keyRefs.begin(), keyRefs.end());
+        for (mfxU32 i = maxKeyRef; i < keyRefs.size(); i++)
+        {
+            task.m_internalListCtrl.RejectedRefList[numRejected].FrameOrder = task.m_frameOrder - keyRefs[i];
+            task.m_internalListCtrl.RejectedRefList[numRejected].PicStruct = MFX_PICSTRUCT_PROGRESSIVE;
+            numRejected++;
+        }
+    }
+}
+mfxStatus ImplementationAvc::BuildPPyr(DdiTask & task, mfxU32 pyrWidth, bool bLastFrameUsing, bool bResetPyr)
+{
+    mfxExtCodingOption3 const   & extOpt3 = GetExtBufferRef(m_video);
+    mfxExtCodingOptionDDI const & extOptDDI = GetExtBufferRef(m_video);
     MFX_CHECK(m_video.mfx.GopRefDist == 1 &&
         extOpt3.PRefType == MFX_P_REF_PYRAMID &&
-        pyrWidth > 1 && pyrWidth <= MAX_PYR_SIZE
+        pyrWidth > 0 && pyrWidth <= MAX_PYR_SIZE
         &&!IsOn(extOpt3.ExtBrcAdaptiveLTR),
         MFX_ERR_NONE);
 
@@ -2244,29 +2264,20 @@ mfxStatus ImplementationAvc::BuildPPyr(DdiTask & task, mfxU32 pyrWidth, bool bLa
     mfxExtAVCRefLists * advCtrl = GetExtBuffer(task.m_ctrl, task.m_fid[0]);
     MFX_CHECK(ctrl == NULL && advCtrl == NULL, MFX_ERR_NONE);
 
+    if (bResetPyr)
+        m_frameOrderPyrStart = task.m_frameOrder;
+
     mfxU32 distFromIntra = task.m_frameOrder - m_frameOrderIntraInDisplayOrder;
-    mfxU32 posInPyr = distFromIntra % pyrWidth;
+    mfxU32 distFromPyrStart = task.m_frameOrder - m_frameOrderPyrStart;
+    mfxU32 posInPyr = distFromPyrStart % pyrWidth;
 
     InitExtBufHeader(task.m_internalListCtrl);
     task.m_internalListCtrlPresent = true;
     if (posInPyr == 0)
     {
         task.m_keyReference = 1;
-        mfxU32 numPrefered = 0;
         mfxU32 numRejected = 0;
-
-        if (bLastFrameUsing)
-            AddRefInPreferredList(task, distFromIntra, 1, numPrefered);
-
-        //to add previous key frame to Ref List
-        AddRefInPreferredList(task, distFromIntra, pyrWidth, numPrefered);
-
-        if (!bLastFrameUsing)
-            AddRefInPreferredList(task, distFromIntra, 2*pyrWidth, numPrefered);
-
-        //reject previous miniGop
-        for (mfxU32 i = 1; i < pyrWidth; i++)
-            AddRefInRejectedList(task, distFromIntra, pyrWidth - i, numRejected);
+        StartNewPyr(task, m_lastTask, extOptDDI.NumActiveRefP, bLastFrameUsing, numRejected);
     }
     else
     {
@@ -2315,6 +2326,7 @@ mfxStatus ImplementationAvc::BuildPPyr(DdiTask & task, mfxU32 pyrWidth, bool bLa
                 rejDiff[pyrWidth - 2][posInPyr - 1];
             AddRefInRejectedList(task, distFromIntra, diff, numRejected);
         }
+        task.m_LowDelayPyramidLayer = layer[pyrWidth - 2][posInPyr - 1];
         if (IsOn(extOpt3.EnableQPOffset))
         {
             task.m_QPdelta = extOpt3.QPOffset[layer[pyrWidth - 2][posInPyr - 1]];
@@ -2566,6 +2578,7 @@ void ImplementationAvc::AssignFrameTypes(DdiTask & newTask)
         m_frameOrderIdrInDisplayOrder = newTask.m_frameOrder;
         m_frameOrderStartTScalStructure = m_frameOrderIdrInDisplayOrder; // IDR always starts new temporal scalabilty structure
         newTask.m_frameOrderStartTScalStructure = m_frameOrderStartTScalStructure;
+        m_frameOrderPyrStart = newTask.m_frameOrder;
         m_miniGopCount = 0;
     }
 
@@ -2573,6 +2586,7 @@ void ImplementationAvc::AssignFrameTypes(DdiTask & newTask)
     {
         m_frameOrderIntraInDisplayOrder = newTask.m_frameOrder;
         m_baseLayerOrderStartIntraRefresh = newTask.m_baseLayerOrder;
+        m_frameOrderPyrStart = newTask.m_frameOrder;
     }
 
 }
@@ -2986,7 +3000,7 @@ mfxStatus ImplementationAvc::AsyncRoutine(mfxBitstream * bs)
 #if defined(MFX_ENABLE_ENCTOOLS_LPLA)
                 if (!m_encTools.IsLookAhead())
 #endif
-                    BuildPPyr(newTask, GetPPyrSize(m_video, 0, false), true);
+                    BuildPPyr(newTask, GetPPyrSize(m_video, 0, false), true, false);
             }
 
             m_timeStamps.push_back(newTask.m_timeStamp);

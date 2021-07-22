@@ -23,6 +23,10 @@
 
 #include "mfxdefs.h"
 
+#ifndef MFX_DEPRECATED_OFF
+#define MFX_DEPRECATED_OFF
+#endif
+
 #ifdef MFX_VA
     #if defined(LINUX32) || defined(LINUX64)
         #include <va/va_version.h>
@@ -127,7 +131,5 @@
 #endif
 
 #define CMAPIUPDATE
-
-#define MFX_ENABLE_HEVCEHW_REFACTORING
 
 #endif // _MFX_CONFIG_H_

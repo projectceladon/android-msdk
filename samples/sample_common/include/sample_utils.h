@@ -683,7 +683,8 @@ private:
             MFX_EXTBUFF_FEI_PPS,
             MFX_EXTBUFF_FEI_SPS,
             MFX_EXTBUFF_LOOKAHEAD_CTRL,
-            MFX_EXTBUFF_LOOKAHEAD_STAT
+            MFX_EXTBUFF_LOOKAHEAD_STAT,
+            MFX_EXTBUFF_DEC_VIDEO_PROCESSING
         };
 
         auto it = std::find_if(std::begin(allowed), std::end(allowed),
@@ -1296,6 +1297,12 @@ struct APIChangeFeatures {
     bool SupportCodecPluginAPI;
 };
 
+inline
+mfxU32 MakeVersion(mfxU16 major, mfxU16 minor)
+{
+    return major * 1000 + minor;
+}
+
 mfxVersion getMinimalRequiredVersion(const APIChangeFeatures &features);
 
 enum msdkAPIFeature {
@@ -1371,5 +1378,32 @@ mfxI32 getMonitorType(msdk_char* str);
 void WaitForDeviceToBecomeFree(MFXVideoSession& session, mfxSyncPoint& syncPoint, mfxStatus& currentStatus);
 
 mfxU16 FourCCToChroma(mfxU32 fourCC);
+
+class FPSLimiter
+{
+public:
+    FPSLimiter()  = default;
+    ~FPSLimiter() = default;
+    void Reset(mfxU32 fps)
+    {
+        m_delayTicks = fps ? msdk_time_get_frequency() / fps : 0;
+    }
+    void Work()
+    {
+        msdk_tick current_tick = msdk_time_get_tick();
+        while( m_delayTicks && (m_startTick + m_delayTicks > current_tick) )
+        {
+            msdk_tick left_tick = m_startTick + m_delayTicks - current_tick;
+            uint32_t sleepTime = (uint32_t)(left_tick * 1000 / msdk_time_get_frequency());
+            MSDK_SLEEP(sleepTime);
+            current_tick = msdk_time_get_tick();
+        };
+        m_startTick = msdk_time_get_tick();
+    }
+
+protected:
+    msdk_tick               m_startTick  = 0;
+    msdk_tick               m_delayTicks = 0;
+};
 
 #endif //__SAMPLE_UTILS_H__

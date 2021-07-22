@@ -454,7 +454,7 @@ mfxStatus VideoDECODEH264::Init(mfxVideoParam *par)
 
     umcVideoParams.lpMemoryAllocator = &m_MemoryAllocator;
 
-#if (MFX_VERSION >= MFX_VERSION_NEXT)
+#if (MFX_VERSION >= 1035)
     umcVideoParams.m_ignore_level_constrain = par->mfx.IgnoreLevelConstrain;
 #endif
 
@@ -1079,12 +1079,8 @@ mfxStatus VideoDECODEH264::RunThread(ThreadTaskInfo* info, mfxU32 threadNumber)
 
         mfxI32 index = m_FrameAllocator->FindSurface(info->surface_out, m_isOpaq);
         pFrame = m_pH264VideoDecoder->FindSurface((UMC::FrameMemID)index);
+        MFX_CHECK(pFrame && pFrame->m_UID != -1, MFX_ERR_NOT_FOUND);
 
-        if (!pFrame || pFrame->m_UID == -1)
-        {
-            VM_ASSERT(false);
-            return MFX_ERR_NOT_FOUND;
-        }
 
         isDecoded = m_pH264VideoDecoder->CheckDecoding(pFrame);
     }
@@ -1597,11 +1593,7 @@ mfxStatus VideoDECODEH264::DecodeFrame(mfxFrameSurface1 *surface_out, UMC::H264D
     {
         index = m_FrameAllocator->FindSurface(surface_out, m_isOpaq);
         pFrame = m_pH264VideoDecoder->FindSurface((UMC::FrameMemID)index);
-        if (!pFrame)
-        {
-            VM_ASSERT(false);
-            return MFX_ERR_NOT_FOUND;
-        }
+        MFX_CHECK(pFrame, MFX_ERR_NOT_FOUND);        
     }
 
     int32_t const error = pFrame->GetError();

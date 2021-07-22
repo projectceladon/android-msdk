@@ -170,6 +170,7 @@ struct sInputParams
 
     mfxU32 nTimeout;
     mfxU16 nPerfOpt; // size of pre-load buffer which used for loop encode
+    mfxU16 nMaxFPS;  // limits overall fps
 
     mfxU16 nNumSlice;
     bool UseRegionEncode;
@@ -398,6 +399,8 @@ protected:
     CTimeStatisticsReal m_statOverall;
     CTimeStatisticsReal m_statFile;
 
+    FPSLimiter m_fpsLimiter;
+
 #if (defined(_WIN64) || defined(_WIN32)) && (MFX_VERSION >= 1031)
     mfxU32    GetPreferredAdapterNum(const mfxAdaptersInfo & adapters, const sInputParams & params);
 #endif
@@ -413,7 +416,6 @@ protected:
     virtual mfxStatus InitVppFilters();
     virtual void FreeVppFilters();
 
-    virtual mfxStatus AllocateExtMVCBuffers();
     virtual void DeallocateExtMVCBuffers();
 
     virtual mfxStatus CreateAllocator();
@@ -440,6 +442,8 @@ protected:
     virtual MFXVideoENCODE* GetFirstEncoder(){return m_pmfxENC;}
 
     virtual mfxU32 FileFourCC2EncFourCC(mfxU32 fcc);
+
+    void InitExtMVCBuffers(mfxExtMVCSeqDesc *mvcBuffer) const;
 };
 
 #endif // __PIPELINE_ENCODE_H__

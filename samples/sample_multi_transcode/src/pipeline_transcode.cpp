@@ -77,6 +77,20 @@ namespace TranscodingSample
 }
 #endif
 
+mfxFrameInfo GetFrameInfo(const MfxVideoParamsWrapper& param)
+{
+    mfxFrameInfo frameInfo = param.mfx.FrameInfo;
+    auto decPostProc = param.GetExtBuffer<mfxExtDecVideoProcessing>();
+    if(decPostProc)
+    {
+        frameInfo.Width = decPostProc->Out.Width;
+        frameInfo.Height = decPostProc->Out.Height;
+        frameInfo.CropW = decPostProc->Out.CropW;
+        frameInfo.CropH = decPostProc->Out.CropH;
+    }
+
+    return frameInfo;
+}
 
 // set structure to define values
 sInputParams::sInputParams() : __sInputParams()
@@ -339,8 +353,8 @@ mfxStatus CTranscodingPipeline::VPPPreInit(sInputParams *pParams)
             m_mfxVppParams.vpp.In.PicStruct = MFX_PICSTRUCT_UNKNOWN;
         }
 
-        if ( (m_mfxDecParams.mfx.FrameInfo.CropW != pParams->nDstWidth && pParams->nDstWidth) ||
-             (m_mfxDecParams.mfx.FrameInfo.CropH != pParams->nDstHeight && pParams->nDstHeight) ||
+        if ( (GetFrameInfo(m_mfxDecParams).CropW != pParams->nDstWidth && pParams->nDstWidth) ||
+             (GetFrameInfo(m_mfxDecParams).CropH != pParams->nDstHeight && pParams->nDstHeight) ||
              (pParams->bEnableDeinterlacing) || (pParams->DenoiseLevel!=-1) || (pParams->DetailLevel!=-1) || (pParams->FRCAlgorithm) ||
              (bVppCompInitRequire) || (pParams->fieldProcessingMode) ||
 #ifdef ENABLE_MCTF
@@ -550,7 +564,8 @@ mfxStatus CTranscodingPipeline::DecodeOneFrame(ExtendedSurface *pExtSurface)
         {
             pExtSurface->pSurface = GetFreeSurface(false, MSDK_SURFACE_WAIT_INTERVAL);
             sts = m_pBSProcessor->GetInputFrame(pExtSurface->pSurface);
-            MFX_CHECK_STS(sts);
+            if(sts != MFX_ERR_NONE)
+                return sts;
         }
         else if (MFX_WRN_DEVICE_BUSY == sts)
         {
@@ -570,6 +585,7 @@ mfxStatus CTranscodingPipeline::DecodeOneFrame(ExtendedSurface *pExtSurface)
                 if (m_bForceStop)
                 {
                     lock.unlock();
+                    m_nTimeout = 0;
                     // add surfaces in queue for all sinks
                     NoMoreFramesSignal();
                     return MFX_WRN_VALUE_NOT_CHANGED;
@@ -1838,7 +1854,7 @@ mfxStatus CTranscodingPipeline::Transcode()
         SetEncCtrlRT(VppExtSurface, m_bInsertIDR);
         m_bInsertIDR = false;
 
-        if (bNeedDecodedFrames)
+        if (DecExtSurface.pSurface)
             m_nProcessedFramesNum++;
 
         if(m_mfxEncParams.mfx.CodecId != MFX_CODEC_DUMP)
@@ -2266,13 +2282,12 @@ mfxStatus CTranscodingPipeline::InitDecMfxParams(sInputParams *pInParams)
         m_mfxDecParams.mfx.FrameInfo.FourCC=pInParams->DecoderFourCC;
         m_mfxDecParams.mfx.FrameInfo.ChromaFormat=FourCCToChroma(pInParams->DecoderFourCC);
     }
+
 #if MFX_VERSION >= 1022
     /* SFC usage if enabled */
-    if ((pInParams->bDecoderPostProcessing) &&
-        (MFX_CODEC_AVC == m_mfxDecParams.mfx.CodecId) && /* Only for AVC */
-        (MFX_PICSTRUCT_PROGRESSIVE == m_mfxDecParams.mfx.FrameInfo.PicStruct)) /* ...And only for progressive!*/
+    if (pInParams->bDecoderPostProcessing)
     {
-        auto decPostProc = m_mfxEncParams.AddExtBuffer<mfxExtDecVideoProcessing>();
+        auto decPostProc = m_mfxDecParams.AddExtBuffer<mfxExtDecVideoProcessing>();
         decPostProc->In.CropX = 0;
         decPostProc->In.CropY = 0;
         decPostProc->In.CropW = m_mfxDecParams.mfx.FrameInfo.CropW;
@@ -2280,14 +2295,15 @@ mfxStatus CTranscodingPipeline::InitDecMfxParams(sInputParams *pInParams)
 
         decPostProc->Out.FourCC = m_mfxDecParams.mfx.FrameInfo.FourCC;
         decPostProc->Out.ChromaFormat = m_mfxDecParams.mfx.FrameInfo.ChromaFormat;
-        decPostProc->Out.Width = MSDK_ALIGN16(pInParams->nVppCompDstW);
-        decPostProc->Out.Height = MSDK_ALIGN16(pInParams->nVppCompDstH);
         decPostProc->Out.CropX = 0;
         decPostProc->Out.CropY = 0;
-        decPostProc->Out.CropW = pInParams->nVppCompDstW;
-        decPostProc->Out.CropH = pInParams->nVppCompDstH;
+        decPostProc->Out.CropW = pInParams->eModeExt == VppComp ? pInParams->nVppCompDstW : pInParams->nDstWidth;
+        decPostProc->Out.CropH = pInParams->eModeExt == VppComp ? pInParams->nVppCompDstH : pInParams->nDstHeight;
+        decPostProc->Out.Width = MSDK_ALIGN16(decPostProc->Out.CropW);
+        decPostProc->Out.Height = MSDK_ALIGN16(decPostProc->Out.CropH);
     }
-#endif //MFX_VERSION >= 1022
+#endif
+
     return MFX_ERR_NONE;
 }// mfxStatus CTranscodingPipeline::InitDecMfxParams()
 
@@ -2305,7 +2321,7 @@ void CTranscodingPipeline::FillFrameInfoForEncoding(mfxFrameInfo& info, sInputPa
     }
     else
     {
-        MSDK_MEMCPY_VAR(info, &m_mfxDecParams.mfx.FrameInfo, sizeof(mfxFrameInfo));
+        info = GetFrameInfo(m_mfxDecParams);
     }
 
     if (pInParams->dEncoderFrameRateOverride)
@@ -2757,7 +2773,7 @@ mfxStatus CTranscodingPipeline::InitPreEncMfxParams(sInputParams *pInParams)
     }
     else
     {
-        MSDK_MEMCPY_VAR(param.mfx.FrameInfo, &m_mfxDecParams.mfx.FrameInfo, sizeof(mfxFrameInfo));
+        param.mfx.FrameInfo = GetFrameInfo(m_mfxDecParams);
     }
 
     mfxU16 InPatternFromParent = (mfxU16) ((MFX_IOPATTERN_OUT_VIDEO_MEMORY == m_mfxDecParams.IOPattern) ?
@@ -2850,7 +2866,7 @@ mfxStatus CTranscodingPipeline::InitVppMfxParams(sInputParams *pInParams)
     }
 
     // input frame info
-    MSDK_MEMCPY_VAR(m_mfxVppParams.vpp.In, &m_mfxDecParams.mfx.FrameInfo, sizeof(mfxFrameInfo));
+    m_mfxVppParams.vpp.In = GetFrameInfo(m_mfxDecParams);
 
     if (m_mfxVppParams.vpp.In.Width * m_mfxVppParams.vpp.In.Height == 0)
     {
@@ -2953,6 +2969,10 @@ mfxStatus CTranscodingPipeline::InitVppMfxParams(sInputParams *pInParams)
             break;
         case MFX_FOURCC_P010:
         case MFX_FOURCC_P210:
+#if (MFX_VERSION >= 1027)
+        case MFX_FOURCC_Y210:
+        case MFX_FOURCC_Y410:
+#endif
             m_mfxVppParams.vpp.Out.BitDepthLuma = m_mfxVppParams.vpp.Out.BitDepthChroma = 10;
             break;
         default:
@@ -3140,7 +3160,7 @@ mfxStatus CTranscodingPipeline::InitPluginMfxParams(sInputParams *pInParams)
     }
     else
     {
-        MSDK_MEMCPY_VAR(m_mfxPluginParams.vpp.In, &m_mfxDecParams.mfx.FrameInfo, sizeof(mfxFrameInfo));
+        m_mfxPluginParams.vpp.In = GetFrameInfo(m_mfxDecParams);
     }
 
     // fill output frame info
@@ -3390,7 +3410,7 @@ mfxStatus CTranscodingPipeline::CalculateNumberOfReqFrames(mfxFrameAllocRequest 
         // It takes 1 surface for overlay
         DecRequest.NumFrameMin = DecRequest.NumFrameSuggested = 1;
         DecRequest.Type = MFX_MEMTYPE_FROM_DECODE | MFX_MEMTYPE_VIDEO_MEMORY_PROCESSOR_TARGET | MFX_MEMTYPE_EXTERNAL_FRAME;
-        MSDK_MEMCPY(&DecRequest.Info, &m_mfxDecParams.mfx.FrameInfo, sizeof(mfxFrameInfo));
+        DecRequest.Info = GetFrameInfo(m_mfxDecParams);
         SumAllocRequest(*pSumRequest, DecRequest);
     }
 
@@ -3754,12 +3774,13 @@ mfxStatus CTranscodingPipeline::Init(sInputParams *pParams,
     MSDK_CHECK_STATUS(sts, "CheckRequiredAPIVersion failed");
 
     // common session settings
-    if (m_Version.Major >= 1 && m_Version.Minor >= 1)
+    mfxU32 version = MakeVersion(m_Version.Major, m_Version.Minor);
+    if (version >= 1001)
         sts = m_pmfxSession->SetPriority(pParams->priority);
 
     // opaque memory feature is available starting with API 1.3 and
     // can be used within 1 intra session or joined inter sessions only
-    if (m_Version.Major >= 1 && m_Version.Minor >= 3 &&
+    if (version >= 1003 &&
         (pParams->eMode == Native || pParams->bIsJoin) && !pParams->rawInput)
     {
         m_bUseOpaqueMemory = true;
@@ -3791,6 +3812,10 @@ mfxStatus CTranscodingPipeline::Init(sInputParams *pParams,
             return sts;
         else
             MSDK_CHECK_STATUS(sts,"DecodePreInit failed");
+    }
+    else
+    {
+        m_mfxDecParams.mfx.FrameInfo.PicStruct = MFX_PICSTRUCT_PROGRESSIVE;
     }
 
     // VPP component initialization
@@ -4130,13 +4155,6 @@ mfxStatus CTranscodingPipeline::SetAllocatorAndHandleIfRequired()
     mfxIMPL impl = 0;
     m_pmfxSession->QueryIMPL(&impl);
 
-    // Media SDK session doesn't require external allocator if the application uses opaque memory
-    if (!m_bUseOpaqueMemory)
-    {
-        sts = m_pmfxSession->SetFrameAllocator(m_pMFXAllocator);
-        MSDK_CHECK_STATUS(sts, "m_pmfxSession->SetFrameAllocator failed");
-    }
-
     mfxHandleType handleType = (mfxHandleType)0;
     bool bIsMustSetExternalHandle = 0;
 
@@ -4163,6 +4181,14 @@ mfxStatus CTranscodingPipeline::SetAllocatorAndHandleIfRequired()
         sts = m_pmfxSession->SetHandle(handleType, m_hdl);
         MSDK_CHECK_STATUS(sts, "m_pmfxSession->SetHandle failed");
     }
+
+    // Media SDK session doesn't require external allocator if the application uses opaque memory
+    if (!m_bUseOpaqueMemory)
+    {
+        sts = m_pmfxSession->SetFrameAllocator(m_pMFXAllocator);
+        MSDK_CHECK_STATUS(sts, "m_pmfxSession->SetFrameAllocator failed");
+    }
+
     return sts;
 }
 

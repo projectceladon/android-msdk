@@ -113,9 +113,6 @@ CDecodingPipeline::CDecodingPipeline()
     m_bResetFileWriter = false;
     m_bResetFileReader = false;
 
-    m_startTick = 0;
-    m_delayTicks = 0;
-
     MSDK_ZERO_MEMORY(m_VppVideoSignalInfo);
     m_VppVideoSignalInfo.Header.BufferId = MFX_EXTBUFF_VPP_VIDEO_SIGNAL_INFO;
     m_VppVideoSignalInfo.Header.BufferSz = sizeof(m_VppVideoSignalInfo);
@@ -343,7 +340,10 @@ mfxStatus CDecodingPipeline::Init(sInputParams *pParams)
     m_strDevicePath = pParams->strDevicePath;
 #endif
 
-    m_memType = pParams->memType;
+    if (pParams->memType)
+        m_memType = pParams->memType;
+    else
+        m_memType = pParams->mode == MODE_FILE_DUMP ? SYSTEM_MEMORY : D3D9_MEMORY;
 
     m_nMaxFps = pParams->nMaxFPS;
     m_nFrames = pParams->nFrames ? pParams->nFrames : MFX_INFINITE;
@@ -397,7 +397,7 @@ mfxStatus CDecodingPipeline::Init(sInputParams *pParams)
     if (bResolutionSpecified)
         m_bDecOutSysmem = pParams->bUseHWLib ? false : true;
     else
-        m_bDecOutSysmem = pParams->memType == SYSTEM_MEMORY;
+        m_bDecOutSysmem = m_memType == SYSTEM_MEMORY;
 
     m_eWorkMode = pParams->mode;
 
@@ -478,7 +478,7 @@ mfxStatus CDecodingPipeline::Init(sInputParams *pParams)
 #endif
     }
 
-    m_delayTicks = pParams->nMaxFPS ? msdk_time_get_frequency() / pParams->nMaxFPS : 0;
+    m_fpsLimiter.Reset(pParams->nMaxFPS);
 
     // create decoder
     m_pmfxDEC = new MFXVideoDECODE(m_mfxSession);
@@ -1161,7 +1161,7 @@ mfxStatus CDecodingPipeline::AllocFrames()
     }
     MSDK_CHECK_STATUS(sts, "m_pmfxDEC->QueryIOSurf failed");
 
-    if (m_nMaxFps)
+    if (m_eWorkMode == MODE_RENDERING)
     {
         // Add surfaces for rendering smoothness
         Request.NumFrameSuggested += m_nMaxFps / 3;
@@ -1213,7 +1213,7 @@ mfxStatus CDecodingPipeline::AllocFrames()
         Request.NumFrameSuggested = Request.NumFrameMin = nSurfNum;
 
         // surfaces are shared between vpp input and decode output
-        Request.Type = MFX_MEMTYPE_EXTERNAL_FRAME | MFX_MEMTYPE_FROM_DECODE | MFX_MEMTYPE_FROM_VPPIN;
+        Request.Type |= MFX_MEMTYPE_EXTERNAL_FRAME | MFX_MEMTYPE_FROM_DECODE | MFX_MEMTYPE_FROM_VPPIN;
     }
 
     if ((Request.NumFrameSuggested < m_mfxVideoParams.AsyncDepth) &&
@@ -1581,22 +1581,14 @@ mfxStatus CDecodingPipeline::DeliverOutput(mfxFrameSurface1* frame)
 #elif LIBVA_SUPPORT
             res = m_hwdev->RenderFrame(frame, m_pGeneralAllocator);
 #endif
-
-            msdk_tick current_tick = msdk_time_get_tick();
-            while( m_delayTicks && (m_startTick + m_delayTicks > current_tick) )
-            {
-                msdk_tick left_tick = m_startTick + m_delayTicks - current_tick;
-                uint32_t sleepTime = (uint32_t)(left_tick * 1000 / msdk_time_get_frequency());
-                MSDK_SLEEP(sleepTime);
-                current_tick = msdk_time_get_tick();
-            };
-            m_startTick=msdk_time_get_tick();
         }
     }
     else {
         res = m_bOutI420 ? m_FileWriter.WriteNextFrameI420(frame)
             : m_FileWriter.WriteNextFrame(frame);
     }
+
+    m_fpsLimiter.Work();
 
     return res;
 }
@@ -1688,6 +1680,7 @@ mfxStatus CDecodingPipeline::SyncOutputSurface(mfxU32 wait)
 
         if (m_eWorkMode == MODE_PERFORMANCE) {
             m_output_count = m_synced_count;
+            m_fpsLimiter.Work();
             ReturnSurfaceToBuffers(m_pCurrentOutputSurface);
         } else if (m_eWorkMode == MODE_FILE_DUMP) {
             sts = DeliverOutput(&(m_pCurrentOutputSurface->surface->frame));
